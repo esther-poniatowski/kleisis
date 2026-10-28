@@ -25,20 +25,24 @@ def _load_mapping(path: Path) -> dict[str, Any]:
     return cast(dict[str, Any], value)
 
 
-def schema_identifier(path: Path) -> str:
-    """Read the logical contract fixed by a concrete JSON Schema."""
+def schema_identifier(path: Path) -> str | None:
+    """Read the logical contract of a concrete schema, or identify a support schema."""
     schema = _load_mapping(path)
     properties = schema.get("properties")
-    if not isinstance(properties, dict):
-        raise RegistryError(f"{path} has no properties mapping")
-    binding = properties.get("_schema")
+    required = schema.get("required")
+    has_property = isinstance(properties, dict) and "_schema" in properties
+    requires_property = isinstance(required, list) and "_schema" in required
+    if not has_property and not requires_property:
+        return None
+    if not isinstance(properties, dict) or "_schema" not in properties:
+        raise RegistryError(f"{path} requires _schema but has no _schema property mapping")
+    binding = properties["_schema"]
     if not isinstance(binding, dict):
-        raise RegistryError(f"{path} has no _schema property mapping")
+        raise RegistryError(f"{path} has an invalid _schema property mapping")
     identifier = binding.get("const")
     if not isinstance(identifier, str) or not identifier.strip():
         raise RegistryError(f"{path} has no non-empty properties._schema.const")
-    required = schema.get("required")
-    if not isinstance(required, list) or "_schema" not in required:
+    if not requires_property:
         raise RegistryError(f"{path} does not require _schema at the root")
     return identifier
 
@@ -50,6 +54,8 @@ def discover_owned_schemas(project_root: Path, schema_root: Path) -> dict[str, P
     result: dict[str, PurePosixPath] = {}
     for path in sorted(candidate_schemas(schema_root)):
         identifier = schema_identifier(path)
+        if identifier is None:
+            continue
         relative = PurePosixPath(path.relative_to(project_root).as_posix())
         previous = result.get(identifier)
         if previous is not None:
@@ -61,7 +67,7 @@ def discover_owned_schemas(project_root: Path, schema_root: Path) -> dict[str, P
 
 
 def candidate_schemas(root: Path) -> list[Path]:
-    """Return files whose names declare concrete JSON Schemas."""
+    """Return files whose names declare JSON Schema candidates."""
     return [
         path
         for path in root.rglob("*")

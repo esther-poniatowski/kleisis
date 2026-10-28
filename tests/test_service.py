@@ -119,6 +119,24 @@ def test_exported_schema_closure_must_be_present(tmp_path: Path) -> None:
         SchemaClosureService().validate(root)
 
 
+def test_every_owned_contract_must_be_exported(tmp_path: Path) -> None:
+    root = tmp_path / "consumer"
+    schemas = root / "specs/schemas"
+    schemas.mkdir(parents=True)
+    (schemas / "exported.schema.yaml").write_text(
+        concrete_schema("consumer:exported@1"), encoding="utf-8"
+    )
+    (schemas / "hidden.schema.yaml").write_text(
+        concrete_schema("consumer:hidden@1"), encoding="utf-8"
+    )
+    (root / "specs/schema-resources.yml").write_text(
+        "format_version: 1\nexports: [consumer:exported@1]\n", encoding="utf-8"
+    )
+
+    with pytest.raises(RegistryError, match="owned contracts are absent from exports"):
+        SchemaClosureService().validate(root)
+
+
 class FailingProvider:
     """Fail after staging begins."""
 
@@ -186,7 +204,7 @@ def test_composite_registry_imports_child_exports_and_checks_shared_bytes(
     (schemas / "shared.schema.yaml").write_text(shared, encoding="utf-8")
     (root / "specs/schema-resources.yml").write_text(
         """format_version: 1
-exports: [parent:owned@1]
+exports: [parent:owned@1, shared:contract@1]
 projects:
   - path: projects/child
 """,

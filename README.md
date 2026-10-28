@@ -95,6 +95,8 @@ The materialization command writes two consumer outputs and one receipt:
 
 The generated registry lists only project-owned identifiers under the key `exports`. By contrast, the key `schemas` can include a dependency identifier outside the export set.
 
+An owned contract uses the root path `properties._schema.const` to state its identifier. Its root `required` list must also name `_schema`. The resource record must export every contract with both entries. A file with neither entry remains an owned support schema. The support schema can still serve a `$ref`. A file with only one entry or an invalid value fails the command.
+
 ## Child projects
 
 A parent imports child exports from explicitly declared repositories:

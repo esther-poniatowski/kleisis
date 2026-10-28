@@ -78,10 +78,15 @@ class SchemaClosureService:
         record = self.load(root)
         owned_root = resolve_inside(root, record.paths.owned_schemas, "paths.owned_schemas")
         owned = discover_owned_schemas(root, owned_root)
-        missing_exports = sorted(set(record.exports) - set(owned))
-        if missing_exports:
+        undeclared_exports = sorted(set(record.exports) - set(owned))
+        if undeclared_exports:
             raise RegistryError(
-                f"exports are not owned by this repository: {', '.join(missing_exports)}"
+                f"exports are not owned by this repository: {', '.join(undeclared_exports)}"
+            )
+        unexported_contracts = sorted(set(owned) - set(record.exports))
+        if unexported_contracts:
+            raise RegistryError(
+                f"owned contracts are absent from exports: {', '.join(unexported_contracts)}"
             )
 
         parent = staging_parent or root.parent

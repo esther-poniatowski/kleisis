@@ -56,6 +56,8 @@ The containing file supplies the base directory. The schema keyword `$id` does n
 Every generated registry must satisfy these invariants:
 
 - every identifier is unique;
+- every owned contract carries a complete root `_schema` binding and enters the export set;
+- every owned file without a binding trace remains outside the registry as a support schema;
 - every generated target stays inside the consumer repository;
 - every imported child export stays inside its declared child repository;
 - every export names an owned schema;
