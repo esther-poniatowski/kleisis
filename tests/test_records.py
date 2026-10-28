@@ -1,0 +1,82 @@
+"""Tests for strict resource-record parsing."""
+
+from pathlib import Path
+
+import pytest
+
+from schema_closure.domain.records import load_resource_record
+from schema_closure.errors import RecordError
+
+
+def write_record(tmp_path: Path, body: str) -> Path:
+    """Write one test record."""
+    path = tmp_path / "record.yml"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_defaults_are_conventional_repository_paths(tmp_path: Path) -> None:
+    record = load_resource_record(write_record(tmp_path, "format_version: 1\n"))
+
+    assert record.paths.owned_schemas.as_posix() == "specs/schemas"
+    assert record.paths.registry.as_posix() == "specs/schema-registry.yml"
+    assert record.paths.resources.as_posix() == ".schema-resources"
+
+
+@pytest.mark.parametrize(
+    "body, message",
+    [
+        ("format_version: 1\nextra: true\n", "unknown fields"),
+        (
+            """format_version: 1
+dependencies:
+  - id: shared
+    registry: specs/schema-registry.yml
+    contracts: [shared:item@1]
+    source:
+      kind: git
+      repository: https://example.invalid/shared.git
+      commit: abc123
+""",
+            "full lowercase Git commit",
+        ),
+        (
+            """format_version: 1
+paths:
+  owned_schemas: ../schemas
+""",
+            "must stay inside",
+        ),
+    ],
+)
+def test_invalid_records_are_rejected(tmp_path: Path, body: str, message: str) -> None:
+    with pytest.raises(RecordError, match=message):
+        load_resource_record(write_record(tmp_path, body))
+
+
+def test_duplicate_yaml_keys_are_rejected(tmp_path: Path) -> None:
+    with pytest.raises(RecordError, match="duplicate key"):
+        load_resource_record(write_record(tmp_path, "format_version: 1\nformat_version: 1\n"))
+
+
+def test_git_credential_names_environment_variable(tmp_path: Path) -> None:
+    record = load_resource_record(
+        write_record(
+            tmp_path,
+            """format_version: 1
+dependencies:
+  - id: private-source
+    source:
+      kind: git
+      repository: https://example.invalid/private.git
+      commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      credential_env: SCHEMA_CLOSURE_GIT_AUTHORIZATION
+    registry: specs/schema-registry.yml
+    contracts: [private:item@1]
+""",
+        )
+    )
+
+    source = record.dependencies[0].source
+    assert source.kind == "git"
+    assert source.credential_env == "SCHEMA_CLOSURE_GIT_AUTHORIZATION"

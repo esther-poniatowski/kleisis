@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "schema-closure"
+version = "0.1.0"
+description = "Materialize exact JSON Schema dependency closures and deterministic registries"
+requires-python = ">=3.12"
+license = "GPL-3.0-or-later"
+authors = [{name = "Esther Poniatowski", email = "esther.poniatowski@ens.psl.eu"}]
+dependencies = ["PyYAML>=6.0,<7"]
+
+[project.scripts]
+schema-closure = "schema_closure.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+schema_closure = ["py.typed"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["schema_closure"]

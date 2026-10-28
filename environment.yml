@@ -1,0 +1,14 @@
+name: schema-closure
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pyyaml>=6,<7
+  - pytest>=8,<9
+  - pytest-cov>=5,<6
+  - mypy>=1.13,<2
+  - ruff>=0.8,<1
+  - types-pyyaml>=6,<7
+  - pip:
+      - -e .
