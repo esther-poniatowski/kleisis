@@ -6,7 +6,7 @@ import hashlib
 import shutil
 from pathlib import Path
 
-from schema_closure.errors import DriftError, RegistryError
+from kleisis.errors import DriftError, RegistryError
 
 
 def digest(path: Path) -> str:

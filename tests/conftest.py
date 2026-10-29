@@ -1,4 +1,4 @@
-"""Shared fixtures for schema-closure tests."""
+"""Shared fixtures for kleisis tests."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from schema_closure.domain.models import Source
+from kleisis.domain.models import Source
 
 
 def concrete_schema(identifier: str, *, reference: str | None = None) -> str:
@@ -75,7 +75,7 @@ exports:
         encoding="utf-8",
     )
     git(["init", "--quiet"], root)
-    git(["config", "user.name", "Schema Closure Tests"], root)
+    git(["config", "user.name", "Kleisis Tests"], root)
     git(["config", "user.email", "tests@example.invalid"], root)
     git(["add", "."], root)
     git(["commit", "--quiet", "-m", "fixture"], root)

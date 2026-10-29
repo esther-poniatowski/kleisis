@@ -9,9 +9,10 @@ import uuid
 from pathlib import Path
 from typing import cast
 
-from schema_closure.errors import RegistryError
+from kleisis.errors import RegistryError
 
-TRANSACTION_FILE = ".schema-closure-transaction.json"
+TRANSACTION_FILE = ".kleisis-transaction.json"
+LEGACY_TRANSACTION_FILE = ".schema-closure-transaction.json"
 
 
 def _remove_path(path: Path) -> None:
@@ -21,7 +22,9 @@ def _remove_path(path: Path) -> None:
         path.unlink(missing_ok=True)
 
 
-def _validated_entries(journal: Path, allowed_targets: set[Path]) -> list[dict[str, object]]:
+def _validated_entries(
+    journal: Path, allowed_targets: set[Path], backup_prefix: str
+) -> list[dict[str, object]]:
     try:
         raw = json.loads(journal.read_text(encoding="utf-8"))
     except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -54,7 +57,10 @@ def _validated_entries(journal: Path, allowed_targets: set[Path]) -> list[dict[s
         backup = Path(backup_value).resolve()
         if target not in allowed_targets or target in targets:
             raise RegistryError(f"publication journal contains an unknown target: {target}")
-        pattern = rf"\.{re.escape(target.name)}\.schema-closure-([0-9a-f]{{32}})\.backup"
+        pattern = (
+            rf"\.{re.escape(target.name)}\."
+            rf"{re.escape(backup_prefix)}-([0-9a-f]{{32}})\.backup"
+        )
         match = re.fullmatch(pattern, backup.name)
         if backup.parent != target.parent or match is None or backup.is_symlink():
             raise RegistryError(f"publication journal contains an invalid backup: {backup}")
@@ -70,15 +76,26 @@ def _validated_entries(journal: Path, allowed_targets: set[Path]) -> list[dict[s
 
 def recover_transaction(project_root: Path, allowed_targets: set[Path]) -> None:
     """Restore the old outputs left by an interrupted publication."""
-    journal = project_root / TRANSACTION_FILE
+    candidates = (
+        (project_root / TRANSACTION_FILE, "kleisis"),
+        (project_root / LEGACY_TRANSACTION_FILE, "schema-closure"),
+    )
+    present = [
+        (journal, prefix)
+        for journal, prefix in candidates
+        if journal.exists() or journal.is_symlink()
+    ]
+    if len(present) > 1:
+        raise RegistryError("multiple publication journals exist")
+    if not present:
+        return
+    journal, backup_prefix = present[0]
     if journal.is_symlink():
         raise RegistryError(f"publication journal must not be a symbolic link: {journal}")
-    if not journal.exists():
-        return
     if not journal.is_file():
         raise RegistryError(f"publication journal must be a regular file: {journal}")
     normalized_targets = {target.resolve() for target in allowed_targets}
-    entries = _validated_entries(journal, normalized_targets)
+    entries = _validated_entries(journal, normalized_targets, backup_prefix)
     try:
         for entry in reversed(entries):
             target = cast(Path, entry["target"])
@@ -104,13 +121,18 @@ def publish_pair(project_root: Path, pairs: list[tuple[Path, Path]]) -> None:
     entries: list[dict[str, object]] = []
     for _, target in pairs:
         target.parent.mkdir(parents=True, exist_ok=True)
-        backup = target.with_name(f".{target.name}.schema-closure-{transaction_id}.backup")
+        backup = target.with_name(f".{target.name}.kleisis-{transaction_id}.backup")
         entries.append(
             {"target": str(target), "backup": str(backup), "had_target": target.exists()}
         )
     journal = project_root / TRANSACTION_FILE
-    if journal.exists() or journal.is_symlink():
-        raise RegistryError(f"publication journal already exists: {journal}")
+    existing = [
+        candidate
+        for candidate in (journal, project_root / LEGACY_TRANSACTION_FILE)
+        if candidate.exists() or candidate.is_symlink()
+    ]
+    if existing:
+        raise RegistryError(f"publication journal already exists: {existing[0]}")
     journal.write_text(json.dumps({"entries": entries}, indent=2) + "\n", encoding="utf-8")
     installed: list[Path] = []
     try:

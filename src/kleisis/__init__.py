@@ -1,6 +1,6 @@
 """Exact JSON Schema dependency closure materialization."""
 
-from schema_closure.application.service import SchemaClosureService
+from kleisis.application.service import SchemaClosureService
 
 __all__ = ["SchemaClosureService"]
-__version__ = "0.1.0"
+__version__ = "0.2.0"

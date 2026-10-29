@@ -1,4 +1,4 @@
-name: schema-closure
+name: kleisis
 channels:
   - conda-forge
 dependencies:

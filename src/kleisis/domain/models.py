@@ -1,4 +1,4 @@
-"""Typed records used by schema-closure."""
+"""Typed records used by kleisis."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
-from schema_closure.errors import RecordError
+from kleisis.errors import RecordError
 
 
 def safe_relative_path(value: object, field_name: str) -> PurePosixPath:

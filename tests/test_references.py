@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from schema_closure.domain.references import reference_closure
-from schema_closure.errors import ReferenceError
+from kleisis.domain.references import reference_closure
+from kleisis.errors import ReferenceError
 
 
 def test_relative_reference_uses_the_containing_file_directory(tmp_path: Path) -> None:

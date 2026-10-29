@@ -7,25 +7,25 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from schema_closure.application.composition import compose_registry
-from schema_closure.application.materialization import materialize_dependency, receipt_bytes
-from schema_closure.application.ports import SourceProvider
-from schema_closure.domain.models import (
+from kleisis.application.composition import compose_registry
+from kleisis.application.materialization import materialize_dependency, receipt_bytes
+from kleisis.application.ports import SourceProvider
+from kleisis.domain.models import (
     MaterializedDependency,
     Registry,
     ResourceRecord,
     resolve_inside,
 )
-from schema_closure.domain.records import load_resource_record
-from schema_closure.domain.references import reference_closure
-from schema_closure.domain.registry import (
+from kleisis.domain.records import load_resource_record
+from kleisis.domain.references import reference_closure
+from kleisis.domain.registry import (
     discover_owned_schemas,
     registry_bytes,
 )
-from schema_closure.errors import DriftError, RegistryError
-from schema_closure.infrastructure.filesystem import copy_tree, tree_manifest
-from schema_closure.infrastructure.publication import publish_pair, recover_transaction
-from schema_closure.infrastructure.sources import ExactSourceProvider
+from kleisis.errors import DriftError, RegistryError
+from kleisis.infrastructure.filesystem import copy_tree, tree_manifest
+from kleisis.infrastructure.publication import publish_pair, recover_transaction
+from kleisis.infrastructure.sources import ExactSourceProvider
 
 _RECEIPT = "receipt.yml"
 _DEFAULT_RECORD = PurePosixPath("specs/schema-resources.yml")
@@ -90,7 +90,7 @@ class SchemaClosureService:
             )
 
         parent = staging_parent or root.parent
-        stage = Path(tempfile.mkdtemp(prefix="schema-closure-stage-", dir=parent))
+        stage = Path(tempfile.mkdtemp(prefix="kleisis-stage-", dir=parent))
         try:
             resources_stage = stage / "resources"
             resources_stage.mkdir()

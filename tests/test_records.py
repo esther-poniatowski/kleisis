@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from schema_closure.domain.records import load_resource_record
-from schema_closure.errors import RecordError
+from kleisis.domain.records import load_resource_record
+from kleisis.errors import RecordError
 
 
 def write_record(tmp_path: Path, body: str) -> Path:
@@ -70,7 +70,7 @@ dependencies:
       kind: git
       repository: https://example.invalid/private.git
       commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-      credential_env: SCHEMA_CLOSURE_GIT_AUTHORIZATION
+      credential_env: KLEISIS_GIT_AUTHORIZATION
     registry: specs/schema-registry.yml
     contracts: [private:item@1]
 """,
@@ -79,4 +79,4 @@ dependencies:
 
     source = record.dependencies[0].source
     assert source.kind == "git"
-    assert source.credential_env == "SCHEMA_CLOSURE_GIT_AUTHORIZATION"
+    assert source.credential_env == "KLEISIS_GIT_AUTHORIZATION"

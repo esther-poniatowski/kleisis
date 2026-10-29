@@ -10,9 +10,9 @@ from pathlib import Path
 import pytest
 from conftest import git
 
-from schema_closure.domain.models import ArtifactSource, GitSource
-from schema_closure.errors import SourceError
-from schema_closure.infrastructure.sources import ExactSourceProvider, _git_environment
+from kleisis.domain.models import ArtifactSource, GitSource
+from kleisis.errors import SourceError
+from kleisis.infrastructure.sources import ExactSourceProvider, _git_environment
 
 
 class Response:
@@ -44,7 +44,7 @@ def test_artifact_provider_verifies_digest_and_extracts(
 ) -> None:
     data = zip_bytes("schemas/item.schema.yaml", "type: string\n")
     monkeypatch.setattr(
-        "schema_closure.infrastructure.sources.urllib.request.urlopen",
+        "kleisis.infrastructure.sources.urllib.request.urlopen",
         lambda locator, timeout: Response(data),
     )
     source = ArtifactSource(
@@ -67,7 +67,7 @@ def test_artifact_provider_rejects_path_traversal(
 ) -> None:
     data = zip_bytes("../escape", "invalid")
     monkeypatch.setattr(
-        "schema_closure.infrastructure.sources.urllib.request.urlopen",
+        "kleisis.infrastructure.sources.urllib.request.urlopen",
         lambda locator, timeout: Response(data),
     )
     source = ArtifactSource(
@@ -87,7 +87,7 @@ def test_git_provider_archives_exact_commit_without_worktree_filters(tmp_path: P
     (repository / "schema.yaml").write_text("value: exact\n", encoding="utf-8")
     (repository / ".gitattributes").write_text("schema.yaml filter=missing\n", encoding="utf-8")
     git(["init", "--quiet"], repository)
-    git(["config", "user.name", "Schema Closure Tests"], repository)
+    git(["config", "user.name", "Kleisis Tests"], repository)
     git(["config", "user.email", "tests@example.invalid"], repository)
     git(["add", "."], repository)
     git(["commit", "--quiet", "-m", "fixture"], repository)
@@ -105,9 +105,9 @@ def test_git_environment_rejects_ambient_git_configuration(
 ) -> None:
     monkeypatch.setenv("GIT_DIR", "/tmp/ambient")
     monkeypatch.setenv("GIT_CONFIG_KEY_9", "filter.unsafe.clean")
-    monkeypatch.setenv("SCHEMA_CLOSURE_GIT_AUTHORIZATION", "Authorization: Bearer secret")
+    monkeypatch.setenv("KLEISIS_GIT_AUTHORIZATION", "Authorization: Bearer secret")
 
-    environment = _git_environment("SCHEMA_CLOSURE_GIT_AUTHORIZATION")
+    environment = _git_environment("KLEISIS_GIT_AUTHORIZATION")
 
     assert "GIT_DIR" not in environment
     assert "GIT_CONFIG_KEY_9" not in environment

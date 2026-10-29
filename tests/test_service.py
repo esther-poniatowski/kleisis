@@ -7,11 +7,11 @@ from pathlib import Path
 import pytest
 from conftest import CopySourceProvider, concrete_schema
 
-from schema_closure.application.service import SchemaClosureService
-from schema_closure.domain.models import Source
-from schema_closure.domain.registry import load_registry
-from schema_closure.errors import DriftError, ReferenceError, RegistryError
-from schema_closure.infrastructure.publication import publish_pair
+from kleisis.application.service import SchemaClosureService
+from kleisis.domain.models import Source
+from kleisis.domain.registry import load_registry
+from kleisis.errors import DriftError, ReferenceError, RegistryError
+from kleisis.infrastructure.publication import publish_pair
 
 
 def make_consumer(root: Path, commit: str) -> None:
@@ -155,7 +155,7 @@ def test_failed_build_removes_staging_directory(tmp_path: Path) -> None:
     with pytest.raises(RegistryError, match="planted acquisition failure"):
         service.validate(root)
 
-    assert not list(tmp_path.glob("schema-closure-stage-*"))
+    assert not list(tmp_path.glob("kleisis-stage-*"))
 
 
 def test_check_does_not_stage_beside_consumer(
@@ -174,8 +174,8 @@ def test_check_does_not_stage_beside_consumer(
 
     service.check(consumer)
 
-    assert not list(tmp_path.glob("schema-closure-stage-*"))
-    assert not list(scratch.glob("schema-closure-stage-*"))
+    assert not list(tmp_path.glob("kleisis-stage-*"))
+    assert not list(scratch.glob("kleisis-stage-*"))
 
 
 def test_publication_rolls_back_both_outputs(
@@ -211,7 +211,7 @@ def test_publication_rolls_back_both_outputs(
 
     assert (resources_target / "old").read_text(encoding="utf-8") == "old resources"
     assert registry_target.read_text(encoding="utf-8") == "old registry"
-    assert not (root / ".schema-closure-transaction.json").exists()
+    assert not (root / ".kleisis-transaction.json").exists()
 
 
 def test_composite_registry_imports_child_exports_and_checks_shared_bytes(

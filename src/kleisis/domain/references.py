@@ -9,8 +9,8 @@ from urllib.parse import unquote
 
 import yaml
 
-from schema_closure.domain.documents import load_document
-from schema_closure.errors import ReferenceError
+from kleisis.domain.documents import load_document
+from kleisis.errors import ReferenceError
 
 _URI = re.compile(r"^[a-z][a-z0-9+.-]*:", re.IGNORECASE)
 _ASCII_ARRAY_INDEX = re.compile(r"^[0-9]+$")

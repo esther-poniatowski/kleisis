@@ -1,4 +1,4 @@
-"""Command-line interface for schema-closure."""
+"""Command-line interface for kleisis."""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ import argparse
 import sys
 from pathlib import Path, PurePosixPath
 
-from schema_closure.application.service import SchemaClosureService
-from schema_closure.errors import SchemaClosureError
+from kleisis.application.service import SchemaClosureService
+from kleisis.errors import SchemaClosureError
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="schema-closure",
+        prog="kleisis",
         description="Materialize exact JSON Schema dependencies and deterministic registries.",
     )
     parser.add_argument(
@@ -42,8 +42,8 @@ def main(arguments: list[str] | None = None) -> None:
         else:
             service.validate(options.root)
     except SchemaClosureError as exc:
-        print(f"schema-closure: {exc}", file=sys.stderr)
+        print(f"kleisis: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
     except OSError as exc:
-        print(f"schema-closure: filesystem operation failed: {exc}", file=sys.stderr)
+        print(f"kleisis: filesystem operation failed: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc

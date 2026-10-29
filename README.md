@@ -1,12 +1,12 @@
-# Schema Closure
+# Kleisis
 
-Schema Closure lets a consumer repository reproduce a local set of schema contracts. That local set contains owned files and exact external files. A relative `$ref` connects files from the directory of its containing schema. A vault-rooted `$ref` connects files from the source root. Finally, the generated registry maps each contract identifier to one file.
+Kleisis is a deterministic schema-closure materializer. It lets a consumer repository reproduce a local set of schema contracts. That local set contains owned files and exact external files. A relative `$ref` connects files from the directory of its containing schema. A vault-rooted `$ref` connects files from the source root. Finally, the generated registry maps each contract identifier to one file.
 
 Runtime consumers need only these local files. To reproduce the same state, the resource record fixes each external source by a full Git commit or an artifact digest.
 
 ## Prerequisites
 
-Running Schema Closure requires Git and Conda. Before the first command, the consumer repository must also contain:
+Running Kleisis requires Git and Conda. Before the first command, the consumer repository must also contain:
 
 - owned concrete schemas under the configured schema directory;
 - the resource record at the default path `specs/schema-resources.yml`;
@@ -75,13 +75,13 @@ Keep the resource directory disjoint from these source and control paths:
 
 The three commands keep writes separate from checks:
 
-- The validation command `schema-closure validate --root .` builds the complete candidate state without changing the repository.
-- The materialization command `schema-closure materialize --root .` replaces both generated outputs. If either write fails, the command attempts to restore both outputs immediately. If the command cannot restore them, it retains the transaction record so a later run can recover them.
-- The check command `schema-closure check --root .` rematerializes in an isolated directory and fails when either generated output differs.
+- The validation command `kleisis validate --root .` builds the complete candidate state without changing the repository.
+- The materialization command `kleisis materialize --root .` replaces both generated outputs. If either write fails, the command attempts to restore both outputs immediately. If the command cannot restore them, it retains the transaction record so a later run can recover them.
+- The check command `kleisis check --root .` rematerializes in an isolated directory and fails when either generated output differs.
 
 Each command accepts the record-path option `--record` when the resource record does not use its default path.
 
-These commands validate the closure through Schema Closure's resolver. The separate consumer qualification gate must still prove that the released Ekphrasis bundle loads every exported schema.
+These commands validate the closure through Kleisis's resolver. The separate consumer qualification gate must still prove that the released Ekphrasis bundle loads every exported schema.
 
 ## Generated state
 
@@ -122,17 +122,17 @@ The materialization command treats each child registry and dependency closure as
 The [architecture and invariants](docs/architecture.md) specify three properties:
 
 - permitted dependencies between modules;
-- how Schema Closure follows the keyword `$ref`;
-- how Schema Closure replaces both outputs safely.
+- how Kleisis follows the keyword `$ref`;
+- how Kleisis replaces both outputs safely.
 
 ## Development
 
 The following commands run the targeted project gates through the dedicated Conda name:
 
 ```console
-conda run -n schema-closure python -m pytest
-conda run -n schema-closure ruff check --no-cache .
-conda run -n schema-closure mypy src tests
+conda run -n kleisis python -m pytest
+conda run -n kleisis ruff check --no-cache .
+conda run -n kleisis mypy src tests
 ```
 
 ## License

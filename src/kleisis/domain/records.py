@@ -9,8 +9,8 @@ from urllib.parse import urlparse
 
 import yaml
 
-from schema_closure.domain.documents import load_document
-from schema_closure.domain.models import (
+from kleisis.domain.documents import load_document
+from kleisis.domain.models import (
     ArtifactSource,
     Dependency,
     GitSource,
@@ -19,7 +19,7 @@ from schema_closure.domain.models import (
     ResourceRecord,
     safe_relative_path,
 )
-from schema_closure.errors import RecordError
+from kleisis.errors import RecordError
 
 _FULL_COMMIT = re.compile(r"[0-9a-f]{40}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")

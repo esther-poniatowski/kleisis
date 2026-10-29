@@ -1,4 +1,4 @@
-"""Errors reported by schema-closure."""
+"""Errors reported by kleisis."""
 
 
 class SchemaClosureError(Exception):

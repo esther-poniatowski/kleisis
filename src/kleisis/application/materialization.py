@@ -5,18 +5,18 @@ from typing import Any
 
 import yaml
 
-from schema_closure.application.ports import SourceProvider
-from schema_closure.domain.models import (
+from kleisis.application.ports import SourceProvider
+from kleisis.domain.models import (
     ArtifactSource,
     GitSource,
     MaterializedDependency,
     ResourceRecord,
     resolve_inside,
 )
-from schema_closure.domain.references import reference_closure
-from schema_closure.domain.registry import load_registry, schema_identifier
-from schema_closure.errors import RegistryError
-from schema_closure.infrastructure.filesystem import copy_file, digest
+from kleisis.domain.references import reference_closure
+from kleisis.domain.registry import load_registry, schema_identifier
+from kleisis.errors import RegistryError
+from kleisis.infrastructure.filesystem import copy_file, digest
 
 
 def _source_facts(source: GitSource | ArtifactSource) -> dict[str, str]:

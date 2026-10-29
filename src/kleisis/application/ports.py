@@ -1,9 +1,9 @@
-"""Ports used by the schema-closure application service."""
+"""Ports used by the kleisis application service."""
 
 from pathlib import Path
 from typing import Protocol
 
-from schema_closure.domain.models import Source
+from kleisis.domain.models import Source
 
 
 class SourceProvider(Protocol):

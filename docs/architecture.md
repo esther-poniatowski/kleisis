@@ -1,10 +1,10 @@
 # Architecture and invariants
 
-Schema Closure rebuilds a consumer repository's schema set from declared source states. A reproducible result requires identical consumer inputs across machines. The owned schemas, resource record and child checkout states constitute those inputs. Therefore, the package modules must isolate source access and replace both generated outputs together.
+Kleisis rebuilds a consumer repository's schema set from declared source states. A reproducible result requires identical consumer inputs across machines. The owned schemas, resource record and child checkout states constitute those inputs. Therefore, the package modules must isolate source access and replace both generated outputs together.
 
 ## System boundary
 
-Schema Closure builds the closure in four steps:
+Kleisis builds the closure in four steps:
 
 - parse and validate the consumer resource record;
 - acquire each dependency at an exact source state;
@@ -43,7 +43,7 @@ A materialization run constructs a complete candidate before it changes the cons
 6. The composite registry imports only explicit child exports after checking shared dependency bytes.
 7. The publisher replaces the resource directory and registry together.
 
-Before the publisher runs, a build failure deletes the staging directory. The publisher may fail during either write. Then, the publisher immediately tries to restore the resource directory and registry. If it cannot restore them, it retains the transaction file `.schema-closure-transaction.json`. A later run reads that file and completes recovery before building a new candidate. The validated record confines recovery to the same two output paths.
+Before the publisher runs, a build failure deletes the staging directory. The publisher may fail during either write. Then, the publisher immediately tries to restore the resource directory and registry. If it cannot restore them, it retains the transaction file `.kleisis-transaction.json`. A later run reads that file and completes recovery before building a new candidate. Recovery also accepts the legacy journal `.schema-closure-transaction.json` with its matching backup names. Publication refuses to start while either journal exists. The validated record confines recovery to the same two output paths.
 
 ## Reference semantics
 

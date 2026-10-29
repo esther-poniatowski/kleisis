@@ -12,8 +12,8 @@ import zipfile
 from pathlib import Path
 from urllib.parse import urlparse
 
-from schema_closure.domain.models import ArtifactSource, GitSource, Source
-from schema_closure.errors import SourceError
+from kleisis.domain.models import ArtifactSource, GitSource, Source
+from kleisis.errors import SourceError
 
 _MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
 _MAX_EXPANDED_BYTES = 256 * 1024 * 1024

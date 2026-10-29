@@ -4,8 +4,8 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
-from schema_closure.domain.registry import discover_owned_schemas
-from schema_closure.errors import RegistryError
+from kleisis.domain.registry import discover_owned_schemas
+from kleisis.errors import RegistryError
 
 
 def test_discovery_separates_contracts_from_support_schemas(tmp_path: Path) -> None:

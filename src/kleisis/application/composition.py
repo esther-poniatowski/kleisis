@@ -2,10 +2,10 @@
 
 from pathlib import Path
 
-from schema_closure.domain.models import Registry, ResourceRecord, resolve_inside
-from schema_closure.domain.references import reference_closure
-from schema_closure.domain.registry import load_registry
-from schema_closure.errors import RegistryError
+from kleisis.domain.models import Registry, ResourceRecord, resolve_inside
+from kleisis.domain.references import reference_closure
+from kleisis.domain.registry import load_registry
+from kleisis.errors import RegistryError
 
 
 def compose_registry(
