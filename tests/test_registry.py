@@ -4,7 +4,8 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
-from kleisis.domain.registry import discover_owned_schemas
+from kleisis.domain.models import Registry
+from kleisis.domain.registry import discover_owned_schemas, load_registry, registry_bytes
 from kleisis.errors import RegistryError
 
 
@@ -58,3 +59,11 @@ def test_discovery_rejects_a_binding_that_is_not_required(tmp_path: Path) -> Non
 
     with pytest.raises(RegistryError, match="does not require _schema"):
         discover_owned_schemas(tmp_path, schema_root)
+
+
+def test_empty_registry_serialization_round_trips(tmp_path: Path) -> None:
+    path = tmp_path / "schema-registry.yml"
+    path.write_bytes(registry_bytes(Registry(schemas={}, exports=())))
+
+    assert path.read_text(encoding="utf-8").endswith("schemas: {}\nexports: []\n")
+    assert load_registry(path) == Registry(schemas={}, exports=())
