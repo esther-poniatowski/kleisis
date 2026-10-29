@@ -155,7 +155,7 @@ class SchemaClosureService:
         """Fail when a fresh candidate differs from the published project state."""
         root = project_root.resolve()
         record = self.load(root)
-        candidate = self.build(root)
+        candidate = self.build(root, staging_parent=Path(tempfile.gettempdir()).resolve())
         resources_target = resolve_inside(root, record.paths.resources, "paths.resources")
         registry_target = resolve_inside(root, record.paths.registry, "paths.registry")
         problems: list[str] = []
@@ -180,5 +180,7 @@ class SchemaClosureService:
 
     def validate(self, project_root: Path) -> None:
         """Validate the record and build all outputs without publishing them."""
-        candidate = self.build(project_root.resolve())
+        candidate = self.build(
+            project_root.resolve(), staging_parent=Path(tempfile.gettempdir()).resolve()
+        )
         shutil.rmtree(candidate.resources.parent, ignore_errors=True)

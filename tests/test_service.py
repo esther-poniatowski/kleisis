@@ -1,6 +1,7 @@
 """Integration tests for exact materialization and drift detection."""
 
 import shutil
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -155,6 +156,26 @@ def test_failed_build_removes_staging_directory(tmp_path: Path) -> None:
         service.validate(root)
 
     assert not list(tmp_path.glob("schema-closure-stage-*"))
+
+
+def test_check_does_not_stage_beside_consumer(
+    tmp_path: Path,
+    exact_source: tuple[Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, commit = exact_source
+    consumer = tmp_path / "consumer"
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    make_consumer(consumer, commit)
+    service = SchemaClosureService(source_provider=CopySourceProvider(source))
+    service.materialize(consumer)
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(scratch))
+
+    service.check(consumer)
+
+    assert not list(tmp_path.glob("schema-closure-stage-*"))
+    assert not list(scratch.glob("schema-closure-stage-*"))
 
 
 def test_publication_rolls_back_both_outputs(
