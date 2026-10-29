@@ -113,7 +113,14 @@ def _acquire_git(source: GitSource, destination: Path) -> None:
         raise SourceError(f"Git source resolved to {actual}, expected {source.commit}")
     archive = destination.parent / f"{destination.name}.tar"
     _run_git(
-        ["archive", "--format=tar", f"--output={archive}", "FETCH_HEAD"],
+        [
+            "--literal-pathspecs",
+            "archive",
+            "--format=tar",
+            f"--output={archive}",
+            "FETCH_HEAD",
+            *(root.as_posix() for root in source.archive_roots),
+        ],
         repository,
         source.credential_env,
     )
@@ -183,7 +190,7 @@ def _extract_tar(archive: Path, destination: Path) -> None:
         for member in members:
             target = _safe_archive_target(destination, member.name)
             if member.issym() or member.islnk():
-                raise SourceError(f"artifact contains a link: {member.name}")
+                continue
             if member.isdir():
                 target.mkdir(parents=True, exist_ok=True)
                 continue

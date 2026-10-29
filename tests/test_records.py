@@ -47,6 +47,48 @@ paths:
 """,
             "must stay inside",
         ),
+        (
+            """format_version: 1
+dependencies:
+  - id: shared
+    registry: specs/schema-registry.yml
+    contracts: [shared:item@1]
+    source:
+      kind: git
+      repository: https://example.invalid/shared.git
+      commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      archive_roots: []
+""",
+            "must be non-empty when present",
+        ),
+        (
+            """format_version: 1
+dependencies:
+  - id: shared
+    registry: specs/schema-registry.yml
+    contracts: [shared:item@1]
+    source:
+      kind: git
+      repository: https://example.invalid/shared.git
+      commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      archive_roots: [utils/schemas, specs/schema-registry.yml]
+""",
+            "path order",
+        ),
+        (
+            """format_version: 1
+dependencies:
+  - id: shared
+    registry: specs/schema-registry.yml
+    contracts: [shared:item@1]
+    source:
+      kind: git
+      repository: https://example.invalid/shared.git
+      commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      archive_roots: [../schemas]
+""",
+            "must stay inside",
+        ),
     ],
 )
 def test_invalid_records_are_rejected(tmp_path: Path, body: str, message: str) -> None:
@@ -59,7 +101,7 @@ def test_duplicate_yaml_keys_are_rejected(tmp_path: Path) -> None:
         load_resource_record(write_record(tmp_path, "format_version: 1\nformat_version: 1\n"))
 
 
-def test_git_credential_names_environment_variable(tmp_path: Path) -> None:
+def test_git_source_records_credential_and_archive_roots(tmp_path: Path) -> None:
     record = load_resource_record(
         write_record(
             tmp_path,
@@ -71,6 +113,9 @@ dependencies:
       repository: https://example.invalid/private.git
       commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       credential_env: KLEISIS_GIT_AUTHORIZATION
+      archive_roots:
+        - schemas
+        - specs/schema-registry.yml
     registry: specs/schema-registry.yml
     contracts: [private:item@1]
 """,
@@ -80,3 +125,7 @@ dependencies:
     source = record.dependencies[0].source
     assert source.kind == "git"
     assert source.credential_env == "KLEISIS_GIT_AUTHORIZATION"
+    assert tuple(path.as_posix() for path in source.archive_roots) == (
+        "schemas",
+        "specs/schema-registry.yml",
+    )

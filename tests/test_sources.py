@@ -4,15 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import io
+import tarfile
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 from conftest import git
 
 from kleisis.domain.models import ArtifactSource, GitSource
 from kleisis.errors import SourceError
-from kleisis.infrastructure.sources import ExactSourceProvider, _git_environment
+from kleisis.infrastructure.sources import ExactSourceProvider, _extract_tar, _git_environment
 
 
 class Response:
@@ -86,18 +87,50 @@ def test_git_provider_archives_exact_commit_without_worktree_filters(tmp_path: P
     repository.mkdir()
     (repository / "schema.yaml").write_text("value: exact\n", encoding="utf-8")
     (repository / ".gitattributes").write_text("schema.yaml filter=missing\n", encoding="utf-8")
+    (repository / "unselected.txt").write_text("outside archive roots\n", encoding="utf-8")
     git(["init", "--quiet"], repository)
     git(["config", "user.name", "Kleisis Tests"], repository)
     git(["config", "user.email", "tests@example.invalid"], repository)
     git(["add", "."], repository)
     git(["commit", "--quiet", "-m", "fixture"], repository)
     commit = git(["rev-parse", "HEAD"], repository)
-    source = GitSource(kind="git", repository=str(repository), commit=commit)
+    source = GitSource(
+        kind="git",
+        repository=str(repository),
+        commit=commit,
+        archive_roots=(PurePosixPath("schema.yaml"),),
+    )
     destination = tmp_path / "destination"
 
     ExactSourceProvider().acquire(source, destination)
 
     assert (destination / "schema.yaml").read_text(encoding="utf-8") == "value: exact\n"
+    assert not (destination / "unselected.txt").exists()
+
+
+def test_tar_extraction_omits_symbolic_and_hard_links(tmp_path: Path) -> None:
+    archive = tmp_path / "source.tar"
+    content = b"type: string\n"
+    with tarfile.open(archive, "w") as bundle:
+        regular = tarfile.TarInfo("schemas/item.schema.yaml")
+        regular.size = len(content)
+        bundle.addfile(regular, io.BytesIO(content))
+        symbolic = tarfile.TarInfo("schemas/symbolic.schema.yaml")
+        symbolic.type = tarfile.SYMTYPE
+        symbolic.linkname = "item.schema.yaml"
+        bundle.addfile(symbolic)
+        hard = tarfile.TarInfo("schemas/hard.schema.yaml")
+        hard.type = tarfile.LNKTYPE
+        hard.linkname = "schemas/item.schema.yaml"
+        bundle.addfile(hard)
+    destination = tmp_path / "destination"
+    destination.mkdir()
+
+    _extract_tar(archive, destination)
+
+    assert (destination / "schemas/item.schema.yaml").read_bytes() == content
+    assert not (destination / "schemas/symbolic.schema.yaml").exists()
+    assert not (destination / "schemas/hard.schema.yaml").exists()
 
 
 def test_git_environment_rejects_ambient_git_configuration(

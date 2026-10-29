@@ -45,6 +45,7 @@ class GitSource:
     repository: str
     commit: str
     credential_env: str | None = None
+    archive_roots: tuple[PurePosixPath, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -103,5 +104,5 @@ class MaterializedDependency:
 
     id: str
     schemas: dict[str, PurePosixPath]
-    source: dict[str, str]
+    source: dict[str, object]
     files: tuple[PurePosixPath, ...] = field(default_factory=tuple)

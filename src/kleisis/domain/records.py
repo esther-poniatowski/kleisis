@@ -118,7 +118,7 @@ def load_resource_record(path: Path) -> ResourceRecord:
         if kind == "git":
             _keys(
                 raw_source,
-                {"kind", "repository", "commit", "credential_env"},
+                {"kind", "repository", "commit", "credential_env", "archive_roots"},
                 f"dependencies[{index}].source",
             )
             credential_env = raw_source.get("credential_env")
@@ -129,6 +129,29 @@ def load_resource_record(path: Path) -> ResourceRecord:
                 raise RecordError(
                     f"dependencies[{index}].source.credential_env must name an environment variable"
                 )
+            raw_archive_roots = raw_source.get("archive_roots")
+            archive_roots = tuple(
+                safe_relative_path(
+                    item,
+                    f"dependencies[{index}].source.archive_roots[{root_index}]",
+                )
+                for root_index, item in enumerate(
+                    _sequence(
+                        raw_archive_roots,
+                        f"dependencies[{index}].source.archive_roots",
+                    )
+                )
+            )
+            if raw_archive_roots is not None and not archive_roots:
+                raise RecordError(
+                    f"dependencies[{index}].source.archive_roots must be non-empty when present"
+                )
+            if len(archive_roots) != len(set(archive_roots)):
+                raise RecordError(f"dependencies[{index}].source.archive_roots must be unique")
+            if archive_roots != tuple(sorted(archive_roots)):
+                raise RecordError(
+                    f"dependencies[{index}].source.archive_roots must follow path order"
+                )
             source = GitSource(
                 kind="git",
                 repository=_portable_https_url(
@@ -136,6 +159,7 @@ def load_resource_record(path: Path) -> ResourceRecord:
                 ),
                 commit=_commit(raw_source.get("commit"), f"dependencies[{index}].source.commit"),
                 credential_env=credential_env,
+                archive_roots=archive_roots,
             )
         elif kind == "artifact":
             _keys(

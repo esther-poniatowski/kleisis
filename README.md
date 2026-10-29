@@ -46,6 +46,9 @@ dependencies:
       kind: git
       repository: https://github.com/esther-poniatowski/geonexus.git
       commit: 0123456789abcdef0123456789abcdef01234567
+      archive_roots:
+        - specs/schema-registry.yml
+        - utils/schemas
     registry: specs/schema-registry.yml
     contracts:
       - geonexus:glossary@1
@@ -54,6 +57,10 @@ dependencies:
 Each dependency identifier uses lower kebab-case. Each Git source uses a web address that starts with `https://`, contains no authentication data and names a full lowercase commit. Instead, an artifact source declares a web address that starts with `https://` and contains no authentication data. The artifact source also declares its source commit and a 256-bit digest.
 
 A private Git source can also name one variable through the optional field `credential_env`. The variable must contain the complete `Authorization` header. The resource record and receipt store only the variable name.
+
+The optional `archive_roots` list restricts a Git archive to the repository-relative files and directories that can contain the registry and its schema closure. Git interprets every entry as a literal path. The list must be non-empty, unique and in path order. Closure validation fails when the list omits a selected schema or one of its references. An absent list archives the complete source state.
+
+Tar archives contribute regular files and directories only. A link with a valid member path is omitted, while an invalid member path still invalidates the archive. Retained ZIP artifacts reject symbolic links. Therefore, a selected registry or schema supplied only through a link remains absent and fails validation.
 
 The optional key `paths` overrides three repository-relative paths:
 

@@ -19,11 +19,17 @@ from kleisis.errors import RegistryError
 from kleisis.infrastructure.filesystem import copy_file, digest
 
 
-def _source_facts(source: GitSource | ArtifactSource) -> dict[str, str]:
+def _source_facts(source: GitSource | ArtifactSource) -> dict[str, object]:
     if isinstance(source, GitSource):
-        facts = {"kind": "git", "repository": source.repository, "commit": source.commit}
+        facts: dict[str, object] = {
+            "kind": "git",
+            "repository": source.repository,
+            "commit": source.commit,
+        }
         if source.credential_env is not None:
             facts["credential_env"] = source.credential_env
+        if source.archive_roots:
+            facts["archive_roots"] = [root.as_posix() for root in source.archive_roots]
         return facts
     return {
         "kind": "artifact",

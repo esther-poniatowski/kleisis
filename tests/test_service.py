@@ -2,16 +2,25 @@
 
 import shutil
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
-from conftest import CopySourceProvider, concrete_schema
+from conftest import CopySourceProvider, concrete_schema, git
 
+from kleisis.application.materialization import materialize_dependency
 from kleisis.application.service import SchemaClosureService
-from kleisis.domain.models import Source
+from kleisis.domain.models import (
+    Dependency,
+    GitSource,
+    MaterializedDependency,
+    Paths,
+    ResourceRecord,
+    Source,
+)
 from kleisis.domain.registry import load_registry
 from kleisis.errors import DriftError, ReferenceError, RegistryError
 from kleisis.infrastructure.publication import publish_pair
+from kleisis.infrastructure.sources import ExactSourceProvider
 
 
 def make_consumer(root: Path, commit: str) -> None:
@@ -37,6 +46,105 @@ dependencies:
 """,
         encoding="utf-8",
     )
+
+
+def make_linked_git_dependency(root: Path, linked_input: str) -> ResourceRecord:
+    """Create one exact dependency whose selected or unrelated input can be a link."""
+    source_root = root / "source"
+    schemas = source_root / "schemas"
+    registry_directory = source_root / "specs"
+    schemas.mkdir(parents=True)
+    registry_directory.mkdir()
+    registry = registry_directory / "schema-registry.yml"
+    registry_text = """schema_version: 1
+schemas:
+  source:main@1: schemas/main.schema.yaml
+exports:
+  - source:main@1
+"""
+    if linked_input == "registry":
+        (registry_directory / "actual-registry.yml").write_text(registry_text, encoding="utf-8")
+        registry.symlink_to("actual-registry.yml")
+    else:
+        registry.write_text(registry_text, encoding="utf-8")
+
+    main = schemas / "main.schema.yaml"
+    if linked_input == "schema":
+        (schemas / "actual.schema.yaml").write_text(
+            concrete_schema("source:main@1"), encoding="utf-8"
+        )
+        main.symlink_to("actual.schema.yaml")
+    elif linked_input == "reference":
+        main.write_text(
+            concrete_schema("source:main@1", reference="defs.schema.yaml#/$defs/value"),
+            encoding="utf-8",
+        )
+        (schemas / "actual-defs.schema.yaml").write_text(
+            "$defs:\n  value: {type: string}\n", encoding="utf-8"
+        )
+        (schemas / "defs.schema.yaml").symlink_to("actual-defs.schema.yaml")
+    else:
+        main.write_text(concrete_schema("source:main@1"), encoding="utf-8")
+        (schemas / "unrelated.schema.yaml").symlink_to("main.schema.yaml")
+
+    git(["init", "--quiet"], source_root)
+    git(["config", "user.name", "Kleisis Tests"], source_root)
+    git(["config", "user.email", "tests@example.invalid"], source_root)
+    git(["add", "."], source_root)
+    git(["commit", "--quiet", "-m", "linked fixture"], source_root)
+    commit = git(["rev-parse", "HEAD"], source_root)
+    return ResourceRecord(
+        format_version=1,
+        paths=Paths(),
+        dependencies=(
+            Dependency(
+                id="shared",
+                source=GitSource(
+                    kind="git",
+                    repository=str(source_root),
+                    commit=commit,
+                    archive_roots=(PurePosixPath("schemas"), PurePosixPath("specs")),
+                ),
+                registry=PurePosixPath("specs/schema-registry.yml"),
+                contracts=("source:main@1",),
+            ),
+        ),
+    )
+
+
+def run_exact_dependency(root: Path, record: ResourceRecord) -> MaterializedDependency:
+    """Materialize one fixture through the real Git source provider."""
+    resources = root / "resources"
+    work = root / "work"
+    resources.mkdir()
+    work.mkdir()
+    return materialize_dependency(ExactSourceProvider(), record, 0, resources, work)
+
+
+def test_unrelated_git_link_does_not_invalidate_selected_closure(tmp_path: Path) -> None:
+    record = make_linked_git_dependency(tmp_path, "unrelated")
+
+    result = run_exact_dependency(tmp_path, record)
+
+    assert (tmp_path / "resources/shared/schemas/main.schema.yaml").is_file()
+    assert result.source["archive_roots"] == ["schemas", "specs"]
+
+
+@pytest.mark.parametrize(
+    ("linked_input", "error"),
+    [
+        ("registry", RegistryError),
+        ("schema", RegistryError),
+        ("reference", ReferenceError),
+    ],
+)
+def test_selected_git_links_fail_closed(
+    tmp_path: Path, linked_input: str, error: type[Exception]
+) -> None:
+    record = make_linked_git_dependency(tmp_path, linked_input)
+
+    with pytest.raises(error):
+        run_exact_dependency(tmp_path, record)
 
 
 def test_materialize_publishes_closure_and_registry(
