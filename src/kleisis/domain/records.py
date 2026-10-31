@@ -192,8 +192,8 @@ def load_resource_record(path: Path) -> ResourceRecord:
                 _sequence(raw_dependency.get("contracts"), f"dependencies[{index}].contracts")
             )
         )
-        if not contracts or len(contracts) != len(set(contracts)):
-            raise RecordError(f"dependencies[{index}].contracts must be non-empty and unique")
+        if len(contracts) != len(set(contracts)):
+            raise RecordError(f"dependencies[{index}].contracts must be unique")
         dependencies.append(
             Dependency(
                 id=dependency_id,

@@ -7,7 +7,7 @@ from pathlib import Path, PurePosixPath
 import pytest
 from conftest import CopySourceProvider, concrete_schema, git
 
-from kleisis.application.materialization import materialize_dependency
+from kleisis.application.materialization import acquire_dependency, materialize_dependencies
 from kleisis.application.service import SchemaClosureService
 from kleisis.domain.models import (
     Dependency,
@@ -118,7 +118,8 @@ def run_exact_dependency(root: Path, record: ResourceRecord) -> MaterializedDepe
     work = root / "work"
     resources.mkdir()
     work.mkdir()
-    return materialize_dependency(ExactSourceProvider(), record, 0, resources, work)
+    acquired = acquire_dependency(ExactSourceProvider(), record, 0, work)
+    return materialize_dependencies([acquired], record, resources)[0]
 
 
 def test_unrelated_git_link_does_not_invalidate_selected_closure(tmp_path: Path) -> None:
@@ -396,4 +397,371 @@ exports:
     )
 
     with pytest.raises(ReferenceError, match="not a regular source file"):
+        SchemaClosureService().validate(root)
+
+
+class MappedSourceProvider:
+    """Supply one fixture tree per declared commit."""
+
+    def __init__(self, roots: dict[str, Path]):
+        self.roots = roots
+
+    def acquire(self, source: Source, destination: Path) -> None:
+        assert isinstance(source, GitSource)
+        shutil.copytree(self.roots[source.commit], destination)
+
+
+LABEL = "https://primitives.example/label"
+NOTE = "https://primitives.example/note"
+
+
+def write_tree(root: Path, files: dict[str, str]) -> Path:
+    """Write one fixture tree."""
+    for relative, text in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return root
+
+
+def make_two_sources(tmp_path: Path, owned_reference: str) -> tuple[Path, MappedSourceProvider]:
+    """Create a consumer whose closure spans two dependencies by absolute identifiers.
+
+    The dependency ``primitives`` publishes a version 2 registry mapping two base resources.
+    The dependency ``shared`` publishes a version 1 registry; its selected contract refers to
+    one resource of ``primitives``. The consumer refers to ``owned_reference``.
+    """
+    primitives = write_tree(
+        tmp_path / "primitives",
+        {
+            "schemas/label.schema.yaml": (
+                f"$id: {LABEL}\n$defs:\n  text: {{$ref: text.schema.yaml}}\n"
+            ),
+            "schemas/text.schema.yaml": "type: string\n",
+            "schemas/note.schema.yaml": f"$id: {NOTE}\ntype: string\n",
+            "schemas/record.schema.yaml": concrete_schema("primitives:record@1", reference=LABEL),
+            "specs/schema-registry.yml": f"""schema_version: 2
+schemas:
+  primitives:record@1: schemas/record.schema.yaml
+exports: [primitives:record@1]
+resources:
+  {LABEL}: schemas/label.schema.yaml
+  {NOTE}: schemas/note.schema.yaml
+  https://other.example/materialized: .schema-resources/other/absent.schema.yaml
+""",
+        },
+    )
+    shared = write_tree(
+        tmp_path / "shared",
+        {
+            "schemas/main.schema.yaml": concrete_schema(
+                "shared:main@1", reference=f"{LABEL}#/$defs/text"
+            ),
+            "specs/schema-registry.yml": """schema_version: 1
+schemas:
+  shared:main@1: schemas/main.schema.yaml
+exports: [shared:main@1]
+""",
+        },
+    )
+    consumer = write_tree(
+        tmp_path / "consumer",
+        {
+            "specs/schemas/owned.schema.yaml": concrete_schema(
+                "consumer:owned@1", reference=owned_reference
+            ),
+            "specs/schema-resources.yml": f"""format_version: 1
+exports: [consumer:owned@1]
+dependencies:
+  - id: shared
+    source: {{kind: git, repository: https://example.invalid/shared.git, commit: {"a" * 40}}}
+    registry: specs/schema-registry.yml
+    contracts: [shared:main@1]
+  - id: primitives
+    source: {{kind: git, repository: https://example.invalid/primitives.git, commit: {"b" * 40}}}
+    registry: specs/schema-registry.yml
+    contracts: [primitives:record@1]
+""",
+        },
+    )
+    return consumer, MappedSourceProvider({"a" * 40: shared, "b" * 40: primitives})
+
+
+def test_closure_spans_two_sources_through_absolute_identifiers(tmp_path: Path) -> None:
+    consumer, provider = make_two_sources(tmp_path, NOTE)
+    service = SchemaClosureService(source_provider=provider)
+
+    service.materialize(consumer)
+
+    resources = consumer / ".schema-resources"
+    assert sorted(
+        path.relative_to(resources).as_posix() for path in resources.rglob("*.schema.yaml")
+    ) == [
+        "primitives/schemas/label.schema.yaml",
+        "primitives/schemas/note.schema.yaml",
+        "primitives/schemas/record.schema.yaml",
+        "primitives/schemas/text.schema.yaml",
+        "shared/schemas/main.schema.yaml",
+    ]
+    registry = load_registry(consumer / "specs/schema-registry.yml")
+    assert {uri: path.as_posix() for uri, path in registry.resources.items()} == {
+        LABEL: ".schema-resources/primitives/schemas/label.schema.yaml",
+        NOTE: ".schema-resources/primitives/schemas/note.schema.yaml",
+    }
+    assert "schema_version: 2\n" in (consumer / "specs/schema-registry.yml").read_text(
+        encoding="utf-8"
+    )
+    service.check(consumer)
+
+
+def test_unknown_absolute_identifier_names_uri_and_referring_file(tmp_path: Path) -> None:
+    consumer, provider = make_two_sources(tmp_path, "https://primitives.example/missing")
+
+    with pytest.raises(
+        ReferenceError,
+        match="'https://primitives.example/missing' in specs/schemas/owned.schema.yaml",
+    ):
+        SchemaClosureService(source_provider=provider).validate(consumer)
+
+
+def test_dependencies_mapping_one_identifier_to_different_bytes_fail(tmp_path: Path) -> None:
+    consumer, provider = make_two_sources(tmp_path, NOTE)
+    write_tree(
+        tmp_path / "shared",
+        {
+            "schemas/note.schema.yaml": f"$id: {NOTE}\ntype: integer\n",
+            "specs/schema-registry.yml": f"""schema_version: 2
+schemas:
+  shared:main@1: schemas/main.schema.yaml
+exports: [shared:main@1]
+resources:
+  {NOTE}: schemas/note.schema.yaml
+""",
+        },
+    )
+
+    with pytest.raises(ReferenceError, match="shared and primitives map .* to different bytes"):
+        SchemaClosureService(source_provider=provider).validate(consumer)
+
+
+def test_owned_and_materialized_identifier_with_different_bytes_fails(tmp_path: Path) -> None:
+    consumer, provider = make_two_sources(tmp_path, NOTE)
+    write_tree(consumer, {"specs/schemas/label.schema.yaml": f"$id: {LABEL}\ntype: integer\n"})
+
+    with pytest.raises(RegistryError, match="duplicate \\$id 'https://primitives.example/label'"):
+        SchemaClosureService(source_provider=provider).validate(consumer)
+
+
+def make_parent_with_resource_child(tmp_path: Path, child_label: str) -> Path:
+    """Create a parent owning one resource and a child whose version 2 registry maps one."""
+    root = write_tree(
+        tmp_path / "parent",
+        {
+            "specs/schemas/parent.schema.yaml": concrete_schema("parent:owned@1"),
+            "specs/schemas/label.schema.yaml": f"$id: {LABEL}\ntype: string\n",
+            "specs/schema-resources.yml": """format_version: 1
+exports: [parent:owned@1]
+projects:
+  - path: projects/child
+""",
+        },
+    )
+    write_tree(
+        root / "projects/child",
+        {
+            "specs/schemas/child.schema.yaml": concrete_schema("child:owned@1", reference=NOTE),
+            ".schema-resources/tool/note.schema.yaml": f"$id: {NOTE}\ntype: string\n",
+            ".schema-resources/tool/label.schema.yaml": child_label,
+            "specs/schema-registry.yml": f"""schema_version: 2
+schemas:
+  child:owned@1: specs/schemas/child.schema.yaml
+exports: [child:owned@1]
+resources:
+  {LABEL}: .schema-resources/tool/label.schema.yaml
+  {NOTE}: .schema-resources/tool/note.schema.yaml
+""",
+        },
+    )
+    return root
+
+
+def test_composite_registry_imports_child_resources(tmp_path: Path) -> None:
+    root = make_parent_with_resource_child(tmp_path, f"$id: {LABEL}\ntype: string\n")
+
+    candidate = SchemaClosureService().build(root)
+    try:
+        assert {uri: path.as_posix() for uri, path in candidate.registry.resources.items()} == {
+            LABEL: "specs/schemas/label.schema.yaml",
+            NOTE: "projects/child/.schema-resources/tool/note.schema.yaml",
+        }
+    finally:
+        shutil.rmtree(candidate.resources.parent)
+
+
+def test_composite_registry_rejects_child_resource_with_different_bytes(tmp_path: Path) -> None:
+    root = make_parent_with_resource_child(tmp_path, f"$id: {LABEL}\ntype: integer\n")
+
+    with pytest.raises(RegistryError, match="duplicate \\$id 'https://primitives.example/label'"):
+        SchemaClosureService().validate(root)
+
+
+def make_resource_only(
+    tmp_path: Path, owned_reference: str | None, registry_version: int = 2
+) -> tuple[Path, MappedSourceProvider]:
+    """Create a consumer whose dependency ``primitives`` selects no contract.
+
+    The registry of ``primitives`` maps one base resource when its version is 2 or later. The
+    consumer refers to ``owned_reference``, or to nothing.
+    """
+    resources = (
+        f"resources:\n  {LABEL}: schemas/label.schema.yaml\n" if registry_version > 1 else ""
+    )
+    primitives = write_tree(
+        tmp_path / "primitives",
+        {
+            "schemas/label.schema.yaml": (
+                f"$id: {LABEL}\n$defs:\n  text: {{$ref: text.schema.yaml}}\n"
+            ),
+            "schemas/text.schema.yaml": "type: string\n",
+            "specs/schema-registry.yml": (
+                f"schema_version: {registry_version}\nschemas: {{}}\nexports: []\n{resources}"
+            ),
+        },
+    )
+    consumer = write_tree(
+        tmp_path / "consumer",
+        {
+            "specs/schemas/owned.schema.yaml": concrete_schema(
+                "consumer:owned@1", reference=owned_reference
+            ),
+            "specs/schema-resources.yml": f"""format_version: 1
+exports: [consumer:owned@1]
+dependencies:
+  - id: primitives
+    source: {{kind: git, repository: https://example.invalid/primitives.git, commit: {"b" * 40}}}
+    registry: specs/schema-registry.yml
+""",
+        },
+    )
+    return consumer, MappedSourceProvider({"b" * 40: primitives})
+
+
+def test_resource_only_dependency_serves_an_absolute_reference(tmp_path: Path) -> None:
+    consumer, provider = make_resource_only(tmp_path, f"{LABEL}#/$defs/text")
+    service = SchemaClosureService(source_provider=provider)
+
+    service.materialize(consumer)
+
+    resources = consumer / ".schema-resources"
+    assert sorted(
+        path.relative_to(resources).as_posix() for path in resources.rglob("*.schema.yaml")
+    ) == ["primitives/schemas/label.schema.yaml", "primitives/schemas/text.schema.yaml"]
+    registry = load_registry(consumer / "specs/schema-registry.yml")
+    assert set(registry.schemas) == {"consumer:owned@1"}
+    assert {uri: path.as_posix() for uri, path in registry.resources.items()} == {
+        LABEL: ".schema-resources/primitives/schemas/label.schema.yaml"
+    }
+    service.check(consumer)
+
+
+def test_resource_only_dependency_with_version_1_registry_fails(tmp_path: Path) -> None:
+    consumer, provider = make_resource_only(tmp_path, LABEL, registry_version=1)
+
+    with pytest.raises(
+        RegistryError, match="dependency primitives selects no contract, and its registry of"
+    ):
+        SchemaClosureService(source_provider=provider).validate(consumer)
+
+
+def test_unused_resource_only_dependency_fails(tmp_path: Path) -> None:
+    consumer, provider = make_resource_only(tmp_path, None)
+
+    with pytest.raises(
+        RegistryError, match="dependency primitives selects no contract, and no reference"
+    ):
+        SchemaClosureService(source_provider=provider).validate(consumer)
+
+
+ROOTED = "/specs/schemas/defs.schema.yaml"
+
+
+def make_rooted_consumer(tmp_path: Path, export_reference: str | None) -> Path:
+    """Create a consumer with no dependency, whose support schema holds a vault-rooted ``$ref``.
+
+    The support schema lies outside the export closure; the export refers to
+    ``export_reference``, or to nothing.
+    """
+    return write_tree(
+        tmp_path / "consumer",
+        {
+            "specs/schemas/owned.schema.yaml": concrete_schema(
+                "consumer:owned@1", reference=export_reference
+            ),
+            "specs/schemas/defs.schema.yaml": "type: string\n",
+            "specs/schemas/support.schema.yaml": f"$ref: {ROOTED}\n",
+            "specs/schema-resources.yml": "format_version: 1\nexports: [consumer:owned@1]\n",
+        },
+    )
+
+
+def test_vault_rooted_reference_outside_every_export_closure_is_admitted(
+    tmp_path: Path,
+) -> None:
+    SchemaClosureService().validate(make_rooted_consumer(tmp_path, None))
+
+
+def test_vault_rooted_reference_in_an_export_closure_fails(tmp_path: Path) -> None:
+    consumer = make_rooted_consumer(tmp_path, ROOTED)
+
+    with pytest.raises(
+        ReferenceError,
+        match=f"'{ROOTED}' in specs/schemas/owned.schema.yaml .* absolute \\$id",
+    ):
+        SchemaClosureService().validate(consumer)
+
+
+def test_vault_rooted_reference_in_a_materialized_file_fails(tmp_path: Path) -> None:
+    consumer, provider = make_two_sources(tmp_path, NOTE)
+    write_tree(
+        tmp_path / "primitives",
+        {"schemas/note.schema.yaml": f"$id: {NOTE}\n$ref: /schemas/text.schema.yaml\n"},
+    )
+
+    with pytest.raises(
+        ReferenceError,
+        match="'/schemas/text.schema.yaml' in schemas/note.schema.yaml in dependency "
+        "primitives .* absolute \\$id",
+    ):
+        SchemaClosureService(source_provider=provider).validate(consumer)
+
+
+def test_vault_rooted_reference_in_a_child_export_closure_fails(tmp_path: Path) -> None:
+    root = write_tree(
+        tmp_path / "parent",
+        {
+            "specs/schemas/parent.schema.yaml": concrete_schema("parent:owned@1"),
+            "specs/schema-resources.yml": """format_version: 1
+exports: [parent:owned@1]
+projects:
+  - path: projects/child
+""",
+        },
+    )
+    write_tree(
+        root / "projects/child",
+        {
+            "specs/schemas/child.schema.yaml": concrete_schema("child:owned@1", reference=ROOTED),
+            "specs/schemas/defs.schema.yaml": "type: string\n",
+            "specs/schema-registry.yml": """schema_version: 2
+schemas:
+  child:owned@1: specs/schemas/child.schema.yaml
+exports: [child:owned@1]
+resources: {}
+""",
+        },
+    )
+
+    with pytest.raises(
+        ReferenceError, match=f"'{ROOTED}' in specs/schemas/child.schema.yaml .* absolute \\$id"
+    ):
         SchemaClosureService().validate(root)

@@ -129,3 +129,42 @@ dependencies:
         "schemas",
         "specs/schema-registry.yml",
     )
+
+
+@pytest.mark.parametrize("contracts", ["", "    contracts: []\n"])
+def test_dependency_may_select_no_contract(tmp_path: Path, contracts: str) -> None:
+    record = load_resource_record(
+        write_record(
+            tmp_path,
+            f"""format_version: 1
+dependencies:
+  - id: primitives
+    source:
+      kind: git
+      repository: https://example.invalid/primitives.git
+      commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    registry: specs/schema-registry.yml
+{contracts}""",
+        )
+    )
+
+    assert record.dependencies[0].contracts == ()
+
+
+def test_dependency_contracts_must_be_unique(tmp_path: Path) -> None:
+    with pytest.raises(RecordError, match="contracts must be unique"):
+        load_resource_record(
+            write_record(
+                tmp_path,
+                """format_version: 1
+dependencies:
+  - id: shared
+    source:
+      kind: git
+      repository: https://example.invalid/shared.git
+      commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    registry: specs/schema-registry.yml
+    contracts: [shared:item@1, shared:item@1]
+""",
+            )
+        )

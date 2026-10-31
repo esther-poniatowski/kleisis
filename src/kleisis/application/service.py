@@ -8,7 +8,12 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from kleisis.application.composition import compose_registry
-from kleisis.application.materialization import materialize_dependency, receipt_bytes
+from kleisis.application.materialization import (
+    AcquiredDependency,
+    acquire_dependency,
+    materialize_dependencies,
+    receipt_bytes,
+)
 from kleisis.application.ports import SourceProvider
 from kleisis.domain.models import (
     MaterializedDependency,
@@ -17,10 +22,12 @@ from kleisis.domain.models import (
     resolve_inside,
 )
 from kleisis.domain.records import load_resource_record
-from kleisis.domain.references import reference_closure
+from kleisis.domain.references import SchemaSource, source_closure
 from kleisis.domain.registry import (
+    candidate_schemas,
     discover_owned_schemas,
     registry_bytes,
+    resource_map,
 )
 from kleisis.errors import DriftError, RegistryError
 from kleisis.infrastructure.filesystem import copy_tree, tree_manifest
@@ -37,6 +44,15 @@ class CandidateState:
 
     resources: Path
     registry: Registry
+
+
+@dataclass(frozen=True)
+class ConsumerClosure:
+    """The files loaded from the owned schemas of a candidate, with the source of each."""
+
+    consumer: SchemaSource
+    owners: dict[Path, SchemaSource]
+    listed_files: tuple[Path, ...]
 
 
 def _paths_overlap(first: PurePosixPath, second: PurePosixPath) -> bool:
@@ -93,38 +109,44 @@ class SchemaClosureService:
         stage = Path(tempfile.mkdtemp(prefix="kleisis-stage-", dir=parent))
         try:
             resources_stage = stage / "resources"
-            resources_stage.mkdir()
             work_root = stage / "sources"
             work_root.mkdir()
-            materialized: list[MaterializedDependency] = []
-            external: dict[str, PurePosixPath] = {}
-            for index in range(len(record.dependencies)):
-                result = materialize_dependency(
-                    self.source_provider, record, index, resources_stage, work_root
-                )
-                duplicates = sorted(set(external) & set(result.schemas))
-                if duplicates:
-                    raise RegistryError(
-                        "dependencies provide duplicate schema identifiers: "
-                        f"{', '.join(duplicates)}"
-                    )
-                external.update(result.schemas)
-                materialized.append(result)
-            owner_conflicts = sorted(set(owned) & set(external))
-            if owner_conflicts:
-                raise RegistryError(
-                    "owned and external schemas use the same identifiers: "
-                    f"{', '.join(owner_conflicts)}"
-                )
-            (resources_stage / _RECEIPT).write_bytes(receipt_bytes(materialized, resources_stage))
-            local = Registry(schemas={**owned, **external}, exports=record.exports)
-            validation_root = stage / "validation"
-            copy_tree(owned_root, validation_root / Path(record.paths.owned_schemas))
-            copy_tree(resources_stage, validation_root / Path(record.paths.resources))
-            exported_targets = [
-                validation_root / Path(owned[identifier]) for identifier in record.exports
+            acquired = [
+                acquire_dependency(self.source_provider, record, index, work_root)
+                for index in range(len(record.dependencies))
             ]
-            reference_closure(validation_root, exported_targets)
+            validation_root = stage / "validation"
+            requested: list[tuple[SchemaSource, Path]] = []
+            while True:
+                materialized, external = self._materialize(
+                    acquired, record, resources_stage, requested
+                )
+                owner_conflicts = sorted(set(owned) & set(external))
+                if owner_conflicts:
+                    raise RegistryError(
+                        "owned and external schemas use the same identifiers: "
+                        f"{', '.join(owner_conflicts)}"
+                    )
+                closure = self._close_consumer(
+                    root, record, owned, materialized, acquired, resources_stage, validation_root
+                )
+                reached = [
+                    (source, path)
+                    for path, source in closure.owners.items()
+                    if source is not closure.consumer
+                ]
+                if not reached:
+                    break
+                requested.extend(reached)
+            self._reject_unused(acquired, materialized)
+            consumer_files = sorted(
+                path for path, source in closure.owners.items() if source is closure.consumer
+            )
+            resources = resource_map(validation_root, [*closure.listed_files, *consumer_files])
+            (resources_stage / _RECEIPT).write_bytes(receipt_bytes(materialized, resources_stage))
+            local = Registry(
+                schemas={**owned, **external}, exports=record.exports, resources=resources
+            )
             composite = compose_registry(root, record, local, resources_stage)
             shutil.rmtree(work_root)
             shutil.rmtree(validation_root)
@@ -132,6 +154,81 @@ class SchemaClosureService:
         except Exception:
             shutil.rmtree(stage, ignore_errors=True)
             raise
+
+    @staticmethod
+    def _close_consumer(
+        root: Path,
+        record: ResourceRecord,
+        owned: dict[str, PurePosixPath],
+        materialized: list[MaterializedDependency],
+        acquired: list[AcquiredDependency],
+        resources_stage: Path,
+        validation_root: Path,
+    ) -> ConsumerClosure:
+        """Close the owned schemas inside a copy of the candidate repository.
+
+        Absolute references resolve through the resources of owned and materialized files, and
+        otherwise through the declared dependencies. A file reached in a dependency source is
+        absent from the candidate, so the caller materializes it and closes again.
+        """
+        shutil.rmtree(validation_root, ignore_errors=True)
+        owned_root = resolve_inside(root, record.paths.owned_schemas, "paths.owned_schemas")
+        copy_tree(owned_root, validation_root / Path(record.paths.owned_schemas))
+        copy_tree(resources_stage, validation_root / Path(record.paths.resources))
+        owned_files = sorted(
+            validation_root / path.relative_to(root) for path in candidate_schemas(owned_root)
+        )
+        materialized_files = sorted(
+            validation_root / Path(record.paths.resources) / Path(path)
+            for dependency in materialized
+            for path in dependency.files
+        )
+        listed_files = [*owned_files, *materialized_files]
+        resources = {
+            uri: validation_root / Path(path)
+            for uri, path in resource_map(validation_root, listed_files).items()
+        }
+        consumer = SchemaSource(name="", root=validation_root, resources=resources)
+        resource_files = set(resources.values())
+        entrypoints = [validation_root / Path(owned[identifier]) for identifier in record.exports]
+        entrypoints += [path for path in owned_files if path in resource_files]
+        owners = source_closure(
+            [(consumer, path) for path in entrypoints], [item.source for item in acquired]
+        )
+        return ConsumerClosure(consumer=consumer, owners=owners, listed_files=tuple(listed_files))
+
+    @staticmethod
+    def _reject_unused(
+        acquired: list[AcquiredDependency], materialized: list[MaterializedDependency]
+    ) -> None:
+        """Fail when a dependency that supplies only resources serves no reference."""
+        for item, result in zip(acquired, materialized, strict=True):
+            if not item.dependency.contracts and not result.files:
+                raise RegistryError(
+                    f"dependency {item.dependency.id} selects no contract, and no reference "
+                    "of the closure reaches its resources; remove the unused dependency"
+                )
+
+    @staticmethod
+    def _materialize(
+        acquired: list[AcquiredDependency],
+        record: ResourceRecord,
+        resources_stage: Path,
+        requested: list[tuple[SchemaSource, Path]],
+    ) -> tuple[list[MaterializedDependency], dict[str, PurePosixPath]]:
+        """Rebuild the resources directory from the selected and requested files."""
+        shutil.rmtree(resources_stage, ignore_errors=True)
+        resources_stage.mkdir()
+        materialized = materialize_dependencies(acquired, record, resources_stage, requested)
+        external: dict[str, PurePosixPath] = {}
+        for result in materialized:
+            duplicates = sorted(set(external) & set(result.schemas))
+            if duplicates:
+                raise RegistryError(
+                    f"dependencies provide duplicate schema identifiers: {', '.join(duplicates)}"
+                )
+            external.update(result.schemas)
+        return materialized, external
 
     def materialize(self, project_root: Path) -> None:
         """Publish a freshly built closure and registry."""

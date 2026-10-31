@@ -1,5 +1,7 @@
-"""Materialize selected contracts from one exact dependency source."""
+"""Materialize selected contracts and their closure from exact dependency sources."""
 
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -8,12 +10,13 @@ import yaml
 from kleisis.application.ports import SourceProvider
 from kleisis.domain.models import (
     ArtifactSource,
+    Dependency,
     GitSource,
     MaterializedDependency,
     ResourceRecord,
     resolve_inside,
 )
-from kleisis.domain.references import reference_closure
+from kleisis.domain.references import SchemaSource, source_closure
 from kleisis.domain.registry import load_registry, schema_identifier
 from kleisis.errors import RegistryError
 from kleisis.infrastructure.filesystem import copy_file, digest
@@ -61,14 +64,27 @@ def receipt_bytes(dependencies: list[MaterializedDependency], resources: Path) -
     return yaml.safe_dump(value, sort_keys=False, allow_unicode=True).encode()
 
 
-def materialize_dependency(
+@dataclass(frozen=True)
+class AcquiredDependency:
+    """One dependency acquired at its exact state, with its selected entrypoints."""
+
+    dependency: Dependency
+    source: SchemaSource
+    contracts: dict[str, PurePosixPath]
+    entrypoints: tuple[Path, ...]
+
+
+def acquire_dependency(
     source_provider: SourceProvider,
     record: ResourceRecord,
     dependency_index: int,
-    resources_stage: Path,
     work_root: Path,
-) -> MaterializedDependency:
-    """Acquire and copy the selected contracts plus their relative-reference closure."""
+) -> AcquiredDependency:
+    """Acquire one exact source and check its registry and selected contract bindings.
+
+    A dependency that selects no contract supplies only resources, so its registry must be of
+    version 2 or later.
+    """
     dependency = record.dependencies[dependency_index]
     source_root = work_root / dependency.id
     source_provider.acquire(dependency.source, source_root)
@@ -76,19 +92,24 @@ def materialize_dependency(
         source_root, dependency.registry, f"dependencies[{dependency_index}].registry"
     )
     source_registry = load_registry(source_registry_path)
+    if not dependency.contracts and source_registry.schema_version < 2:
+        raise RegistryError(
+            f"dependency {dependency.id} selects no contract, and its registry of version "
+            f"{source_registry.schema_version} supplies no resources"
+        )
     missing = sorted(set(dependency.contracts) - set(source_registry.schemas))
     if missing:
         raise RegistryError(
             f"dependency {dependency.id} does not provide selected contracts: {', '.join(missing)}"
         )
-    entrypoints = [
+    entrypoints = tuple(
         resolve_inside(
             source_root,
             source_registry.schemas[identifier],
             f"dependency {dependency.id} contract {identifier}",
         )
         for identifier in dependency.contracts
-    ]
+    )
     for identifier, entrypoint in zip(dependency.contracts, entrypoints, strict=True):
         declared = schema_identifier(entrypoint)
         if declared != identifier:
@@ -96,22 +117,48 @@ def materialize_dependency(
                 f"dependency {dependency.id} registry maps {identifier!r} to a schema "
                 f"declaring {declared!r}"
             )
-    closure = reference_closure(source_root, entrypoints)
-    copied: list[PurePosixPath] = []
-    for source_path in sorted(closure):
-        source_relative = PurePosixPath(source_path.relative_to(source_root).as_posix())
-        output_relative = PurePosixPath(dependency.id) / source_relative
-        copy_file(source_path, resources_stage / Path(output_relative))
-        copied.append(output_relative)
-    schemas = {
-        identifier: record.paths.resources
-        / PurePosixPath(dependency.id)
-        / source_registry.schemas[identifier]
-        for identifier in dependency.contracts
+    resources = {
+        uri: resolve_inside(source_root, target, f"dependency {dependency.id} resource {uri}")
+        for uri, target in source_registry.resources.items()
     }
-    return MaterializedDependency(
-        id=dependency.id,
-        schemas=schemas,
-        source=_source_facts(dependency.source),
-        files=tuple(copied),
+    return AcquiredDependency(
+        dependency=dependency,
+        source=SchemaSource(name=dependency.id, root=source_root, resources=resources),
+        contracts={
+            identifier: source_registry.schemas[identifier] for identifier in dependency.contracts
+        },
+        entrypoints=entrypoints,
     )
+
+
+def materialize_dependencies(
+    acquired: Sequence[AcquiredDependency],
+    record: ResourceRecord,
+    resources_stage: Path,
+    requested: Sequence[tuple[SchemaSource, Path]] = (),
+) -> list[MaterializedDependency]:
+    """Copy the selected contracts, the requested files, and their closure across sources."""
+    sources = [item.source for item in acquired]
+    entrypoints = [(item.source, path) for item in acquired for path in item.entrypoints]
+    owners = source_closure([*entrypoints, *requested], sources)
+    result: list[MaterializedDependency] = []
+    for item in acquired:
+        source_root = item.source.root.resolve()
+        copied: list[PurePosixPath] = []
+        for source_path in sorted(path for path, owner in owners.items() if owner is item.source):
+            source_relative = PurePosixPath(source_path.relative_to(source_root).as_posix())
+            output_relative = PurePosixPath(item.dependency.id) / source_relative
+            copy_file(source_path, resources_stage / Path(output_relative))
+            copied.append(output_relative)
+        result.append(
+            MaterializedDependency(
+                id=item.dependency.id,
+                schemas={
+                    identifier: record.paths.resources / PurePosixPath(item.dependency.id) / target
+                    for identifier, target in item.contracts.items()
+                },
+                source=_source_facts(item.dependency.source),
+                files=tuple(copied),
+            )
+        )
+    return result

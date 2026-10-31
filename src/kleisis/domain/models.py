@@ -63,7 +63,10 @@ Source = GitSource | ArtifactSource
 
 @dataclass(frozen=True)
 class Dependency:
-    """A selected set of contracts from one exact external source."""
+    """One exact external source, with its selected contracts.
+
+    A dependency with no contract supplies only the ``resources`` map of its registry.
+    """
 
     id: str
     source: Source
@@ -92,10 +95,16 @@ class ResourceRecord:
 
 @dataclass(frozen=True)
 class Registry:
-    """A deterministic logical identifier registry."""
+    """A deterministic registry of logical identifiers and absolute schema identifiers.
+
+    ``schema_version`` records the format version read; the serializer always writes the
+    current version.
+    """
 
     schemas: dict[str, PurePosixPath]
     exports: tuple[str, ...] = ()
+    resources: dict[str, PurePosixPath] = field(default_factory=dict)
+    schema_version: int = 2
 
 
 @dataclass(frozen=True)
