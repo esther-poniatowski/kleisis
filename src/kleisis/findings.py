@@ -108,9 +108,6 @@ DRIFT_RESOURCES = Rule(
 DRIFT_REGISTRY = Rule(
     "drift/registry", "The generated registry is absent or differs from a fresh build."
 )
-FILESYSTEM_FAILED = Rule(
-    "filesystem/failed", "An operating-system operation failed during the command."
-)
 
 RULES: tuple[Rule, ...] = (
     RECORD_UNREADABLE,
@@ -143,7 +140,6 @@ RULES: tuple[Rule, ...] = (
     CHILD_SHARED_BYTES,
     DRIFT_RESOURCES,
     DRIFT_REGISTRY,
-    FILESYSTEM_FAILED,
 )
 
 

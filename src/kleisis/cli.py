@@ -6,11 +6,12 @@ import argparse
 import json
 import sys
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 from kleisis import __version__
 from kleisis.application.service import SchemaClosureService
-from kleisis.errors import SchemaClosureError
-from kleisis.findings import FILESYSTEM_FAILED, Finding, complete
+from kleisis.errors import DriftError, SchemaClosureError
+from kleisis.findings import Finding
 from kleisis.sarif import sarif_log
 
 _REPORTING_COMMANDS = ("check", "validate")
@@ -38,9 +39,41 @@ def _parser() -> argparse.ArgumentParser:
         choices=("text", "sarif"),
         default="text",
         help="report of check and validate: text writes a line on standard error on failure; "
-        "sarif also writes a SARIF 2.1.0 log on standard output",
+        "sarif also writes a SARIF 2.1.0 log on standard output or at --output",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="with --format sarif, write the log to this path instead of standard output; "
+        "missing parent directories are created",
     )
     return parser
+
+
+def _stop_reason(failure: SchemaClosureError) -> str | None:
+    """Return why the analysis stopped before its end, or ``None`` when it ran to its end.
+
+    ``check`` raises a drift error only after comparing every output, so its run is complete.
+    Every other failure stops the build at its first failure.
+    """
+    if isinstance(failure, DriftError):
+        return None
+    rules = ", ".join(sorted({finding.rule.id for finding in failure.findings}))
+    return f"the build stopped at its first failure ({rules}); later stages were not evaluated"
+
+
+def _write_log(log: dict[str, Any], output: Path | None) -> None:
+    """Write ``log`` to ``output``, or to standard output when ``output`` is ``None``."""
+    text = json.dumps(log, indent=2) + "\n"
+    if output is None:
+        sys.stdout.write(text)
+        return
+    try:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(text, encoding="utf-8")
+    except OSError as exc:
+        print(f"kleisis: cannot write the SARIF log: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
 
 
 def main(arguments: list[str] | None = None) -> None:
@@ -49,9 +82,12 @@ def main(arguments: list[str] | None = None) -> None:
     options = parser.parse_args(arguments)
     if options.format == "sarif" and options.command not in _REPORTING_COMMANDS:
         parser.error(f"--format sarif applies to {' and '.join(_REPORTING_COMMANDS)} only")
+    if options.output is not None and options.format != "sarif":
+        parser.error("--output requires --format sarif")
     service = SchemaClosureService(options.record)
     findings: tuple[Finding, ...] = ()
     failure: Exception | None = None
+    stopped: str | None = None
     try:
         if options.command == "materialize":
             service.materialize(options.root)
@@ -61,15 +97,14 @@ def main(arguments: list[str] | None = None) -> None:
             service.validate(options.root)
     except SchemaClosureError as exc:
         print(f"kleisis: {exc}", file=sys.stderr)
-        findings, failure = exc.findings, exc
+        findings, failure, stopped = exc.findings, exc, _stop_reason(exc)
     except OSError as exc:
         message = f"filesystem operation failed: {exc}"
         print(f"kleisis: {message}", file=sys.stderr)
-        # An interrupted operation names no subject of its own, so it concerns the record.
-        finding = Finding(rule=FILESYSTEM_FAILED, message=message)
-        findings, failure = (complete(finding, options.record),), exc
+        # A crash is no defect of the analysed files: the run reports it as its failure, and
+        # holds the results detected before it, none under the first-failure rule.
+        failure, stopped = exc, message
     if options.format == "sarif":
-        json.dump(sarif_log(findings, __version__), sys.stdout, indent=2)
-        sys.stdout.write("\n")
+        _write_log(sarif_log(findings, __version__, stopped), options.output)
     if failure is not None:
         raise SystemExit(1) from failure

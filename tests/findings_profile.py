@@ -4,7 +4,7 @@ The rules follow sections 3, 4 and 5 of the findings profile of Elenchos, versio
 (``docs/profile.md``). This module imports nothing from kleisis, so that it checks the output
 of kleisis against the text of the profile and not against the serializer that wrote it. The
 vectors in ``fixtures/elenchos`` are copies of ``specs/vectors`` of Elenchos at commit
-``69fc2c1da09fd17c32121ab79c0fbb02ecd53fcb``.
+``16e435a201ee3e53a36c39559457f2847a44dc0e``.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ SCHEMA = (
     "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json"
 )
 LEVELS = {"error", "warning", "note"}
+NOTIFICATION_LEVELS = {"none", "note", "warning", "error"}
 COLUMN_KINDS = {"unicodeCodePoints", "utf16CodeUnits"}
 TOOL_NAME = re.compile(r"[a-z][a-z0-9-]*")
 RULE_ID = re.compile(r"[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)*")
@@ -167,28 +168,117 @@ def _physical_violations(physical: dict[str, Any], path: str) -> list[str]:
     return problems
 
 
-def run_violations(run: dict[str, Any]) -> list[str]:
-    """Sections 3 and 4: the violations of one run of a producer."""
+def _rules_violations(driver: dict[str, Any]) -> tuple[list[str], set[str] | None]:
+    """Section 3: one reporting descriptor per rule of the tool, each with its three fields."""
+    rules = driver.get("rules")
+    if not isinstance(rules, list):
+        return ["tool.driver.rules is absent or not an array"], None
+    problems: list[str] = []
+    rule_ids: set[str] = set()
+    for rule in rules:
+        rule_id = rule.get("id")
+        if not isinstance(rule_id, str) or not RULE_ID.fullmatch(rule_id):
+            problems.append(f"rule id is absent or malformed: {rule_id!r}")
+        else:
+            rule_ids.add(rule_id)
+        if not isinstance(rule.get("shortDescription", {}).get("text"), str):
+            problems.append(f"rule {rule_id} has no shortDescription")
+        if rule.get("defaultConfiguration", {}).get("level") not in LEVELS:
+            problems.append(f"rule {rule_id} has no default level")
+    return problems, rule_ids
+
+
+def _notification_violations(notification: object) -> list[str]:
+    """Section 5.6: a notification is an object with an admitted level, when present."""
+    if not isinstance(notification, dict):
+        return ["notification is not an object"]
+    problems: list[str] = []
+    if "level" in notification and notification["level"] not in NOTIFICATION_LEVELS:
+        problems.append(f"notification level is invalid: {notification['level']!r}")
+    message = notification.get("message")
+    if not isinstance(message, dict) or not isinstance(message.get("text"), str):
+        problems.append("notification has no message.text")
+    elif not message["text"]:
+        problems.append("notification message.text is empty")
+    return problems
+
+
+def is_incomplete(run: dict[str, Any]) -> bool:
+    """Section 3: a run is incomplete when an invocation declares a failed execution.
+
+    An invocation declares it by ``executionSuccessful`` false, or by a notification of level
+    ``error`` (§3.20.14, §3.20.21).
+    """
+    for invocation in run.get("invocations") or []:
+        if not isinstance(invocation, dict):
+            continue
+        if invocation.get("executionSuccessful") is False:
+            return True
+        notifications = invocation.get("toolExecutionNotifications") or []
+        if any(isinstance(item, dict) and item.get("level") == "error" for item in notifications):
+            return True
+    return False
+
+
+def _invocations_violations(run: dict[str, Any]) -> list[str]:
+    """Section 3, incomplete runs: the invocation of a complete or an incomplete run."""
+    if "invocations" not in run:
+        return []
+    invocations = run["invocations"]
+    if not isinstance(invocations, list) or len(invocations) != 1:
+        return ["invocations does not hold exactly one invocation"]
+    invocation = invocations[0]
+    if not isinstance(invocation, dict):
+        return ["invocation is not an object"]
+    problems: list[str] = []
+    succeeded = invocation.get("executionSuccessful")
+    if not isinstance(succeeded, bool):
+        problems.append("invocation has no boolean executionSuccessful")
+    notifications = invocation.get("toolExecutionNotifications", [])
+    if not isinstance(notifications, list):
+        return [*problems, "toolExecutionNotifications is not an array"]
+    for notification in notifications:
+        problems += _notification_violations(notification)
+    errors = [
+        item for item in notifications if isinstance(item, dict) and item.get("level") == "error"
+    ]
+    if succeeded is False and not errors:
+        problems.append("a failed invocation holds no notification of level error")
+    if succeeded is True and errors:
+        problems.append("a successful invocation holds a notification of level error")
+    return problems
+
+
+def run_violations(run: dict[str, Any], *, require_rules: bool = True) -> list[str]:
+    """Sections 3 and 4: the violations of one run of a producer.
+
+    ``require_rules`` checks the rule list of the driver, which the profile requires of a
+    producer and which the gate does not check. The vectors of the profile omit it.
+    """
     problems: list[str] = []
     driver = run.get("tool", {}).get("driver", {})
     name = driver.get("name")
     if not isinstance(name, str) or not TOOL_NAME.fullmatch(name):
         problems.append(f"tool.driver.name is absent or malformed: {name!r}")
         name = ""
+    elif name == "elenchos":
+        problems.append("a producer names its driver elenchos")
     if not any(isinstance(driver.get(key), str) for key in ("version", "semanticVersion")):
         problems.append("tool.driver has neither version nor semanticVersion")
     rule_ids: set[str] | None = None
-    if "rules" in driver:
-        rule_ids = set()
-        for rule in driver["rules"]:
-            rule_ids.add(rule.get("id"))
-            if not isinstance(rule.get("id"), str) or not RULE_ID.fullmatch(rule["id"]):
-                problems.append(f"rule id is malformed: {rule.get('id')!r}")
-            if not isinstance(rule.get("shortDescription", {}).get("text"), str):
-                problems.append(f"rule {rule.get('id')} has no shortDescription")
-            if rule.get("defaultConfiguration", {}).get("level") not in LEVELS:
-                problems.append(f"rule {rule.get('id')} has no default level")
-    results = run.get("results", [])
+    if require_rules or "rules" in driver:
+        rule_problems, rule_ids = _rules_violations(driver)
+        problems += rule_problems
+    problems += _invocations_violations(run)
+    if "results" not in run:
+        if not is_incomplete(run):
+            problems.append("results is absent from a run that declares no failure")
+        results: list[Any] = []
+    elif not isinstance(run["results"], list):
+        problems.append("results is not an array")
+        results = []
+    else:
+        results = run["results"]
     if results and run.get("columnKind") not in COLUMN_KINDS:
         problems.append("columnKind is absent although results is non-empty")
     for index, result in enumerate(results):
@@ -198,7 +288,7 @@ def run_violations(run: dict[str, Any]) -> list[str]:
     return problems
 
 
-def log_violations(log: dict[str, Any]) -> list[str]:
+def log_violations(log: dict[str, Any], *, require_rules: bool = True) -> list[str]:
     """Section 3: the violations of a log, each run checked as the run of a producer."""
     problems: list[str] = []
     if log.get("version") != "2.1.0":
@@ -209,7 +299,10 @@ def log_violations(log: dict[str, Any]) -> list[str]:
     if not isinstance(runs, list) or not runs:
         return [*problems, "runs is absent or empty"]
     for index, run in enumerate(runs):
-        problems += [f"run {index}: {problem}" for problem in run_violations(run)]
+        problems += [
+            f"run {index}: {problem}"
+            for problem in run_violations(run, require_rules=require_rules)
+        ]
     return problems
 
 

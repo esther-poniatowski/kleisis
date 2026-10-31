@@ -93,6 +93,9 @@ class ReferenceError(SchemaClosureError):
 
 
 class DriftError(SchemaClosureError):
-    """Generated files differ from a fresh materialization."""
+    """Generated files differ from a fresh materialization.
+
+    The check raises it only after comparing every output, so it ends a complete analysis.
+    """
 
     default_rule = DRIFT_RESOURCES

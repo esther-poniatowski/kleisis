@@ -1,10 +1,15 @@
 """Write findings as a log of the findings profile of Elenchos, a subset of SARIF 2.1.0.
 
-The log holds one run of the driver ``kleisis``. Each result names its rule, its level and its
-message, the file concerned as a physical location relative to ``SRCROOT``, and one logical
-location ``<resource>#<locus>``. Kleisis knows no line or column of a failure, so no result
-holds a region, and a physical location denotes the whole file or folder. The gate builds the
-identity of each result and writes its suppressions; a producer writes neither.
+The log holds one run of the driver ``kleisis``, whose driver lists every rule of the catalogue.
+Each result names its rule, its level and its message, the file concerned as a physical location
+relative to ``SRCROOT``, and one logical location ``<resource>#<locus>``. Kleisis knows no line
+or column of a failure, so no result holds a region, and a physical location denotes the whole
+file or folder. The gate builds the identity of each result and writes its suppressions; a
+producer writes neither.
+
+The run holds one invocation, which states whether the analysis ran to its end. A run that
+stopped, at the first failure of the build or on a crash, declares a failed invocation with one
+notification of level ``error`` stating why it stopped.
 """
 
 from __future__ import annotations
@@ -75,8 +80,25 @@ def _result(finding: Finding) -> dict[str, Any]:
     return result
 
 
-def sarif_log(findings: Sequence[Finding], version: str) -> dict[str, Any]:
-    """Return the log of one run of kleisis of ``version``, with one result per finding."""
+def invocation(stopped: str | None) -> dict[str, Any]:
+    """Return the invocation of a run, failed with the reason ``stopped`` when it is given."""
+    if stopped is None:
+        return {"executionSuccessful": True}
+    return {
+        "executionSuccessful": False,
+        "toolExecutionNotifications": [{"level": "error", "message": {"text": stopped}}],
+    }
+
+
+def sarif_log(
+    findings: Sequence[Finding], version: str, stopped: str | None = None
+) -> dict[str, Any]:
+    """Return the log of one run of kleisis of ``version``, with one result per finding.
+
+    ``stopped`` states why the analysis stopped before its end, and is ``None`` for a complete
+    run. The analysis of kleisis begins with the command, so ``results`` is always written,
+    empty when the run detected nothing before it stopped.
+    """
     rules = [
         {
             "id": rule.id,
@@ -91,6 +113,7 @@ def sarif_log(findings: Sequence[Finding], version: str) -> dict[str, Any]:
         "runs": [
             {
                 "tool": {"driver": {"name": TOOL_NAME, "version": version, "rules": rules}},
+                "invocations": [invocation(stopped)],
                 "columnKind": "unicodeCodePoints",
                 "results": [_result(finding) for finding in findings],
             }

@@ -747,5 +747,213 @@
     "expected": [
       "geonexus|example/nfc|path:docs/caf\u00e9.md"
     ]
+  },
+  {
+    "case": "missing-field",
+    "description": "findings on fields absent from the record: the region is that of the closest existing ancestor, absent when that ancestor is the whole document; the locus is the pointer of the missing field",
+    "log": {
+      "version": "2.1.0",
+      "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+      "runs": [
+        {
+          "tool": {
+            "driver": {
+              "name": "ekthesis",
+              "version": "0.0.0"
+            }
+          },
+          "columnKind": "unicodeCodePoints",
+          "results": [
+            {
+              "ruleId": "existing-references",
+              "level": "error",
+              "message": {
+                "text": "finding"
+              },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": {
+                      "uri": "records/arg.yml",
+                      "uriBaseId": "SRCROOT"
+                    },
+                    "region": {
+                      "startLine": 7,
+                      "startColumn": 5
+                    }
+                  },
+                  "logicalLocations": [
+                    {
+                      "name": "path:records/arg.yml#/relations/0/target"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "ruleId": "existing-references",
+              "level": "error",
+              "message": {
+                "text": "finding"
+              },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": {
+                      "uri": "records/arg.yml",
+                      "uriBaseId": "SRCROOT"
+                    }
+                  },
+                  "logicalLocations": [
+                    {
+                      "name": "path:records/arg.yml#/summary"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "expected": [
+      "ekthesis|existing-references|path:records/arg.yml|/relations/0/target",
+      "ekthesis|existing-references|path:records/arg.yml|/summary"
+    ]
+  },
+  {
+    "case": "partial-run",
+    "description": "a run stopped by design at its first failure declares a failed invocation, and its results keep their identities",
+    "log": {
+      "version": "2.1.0",
+      "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+      "runs": [
+        {
+          "tool": {
+            "driver": {
+              "name": "kleisis",
+              "version": "0.0.0"
+            }
+          },
+          "columnKind": "unicodeCodePoints",
+          "invocations": [
+            {
+              "executionSuccessful": false,
+              "toolExecutionNotifications": [
+                {
+                  "level": "error",
+                  "message": {
+                    "text": "the build stopped at its first failure"
+                  }
+                }
+              ]
+            }
+          ],
+          "results": [
+            {
+              "ruleId": "source/unavailable",
+              "level": "error",
+              "message": {
+                "text": "finding"
+              },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": {
+                      "uri": "config/kleisis.yml",
+                      "uriBaseId": "SRCROOT"
+                    }
+                  },
+                  "logicalLocations": [
+                    {
+                      "name": "path:config/kleisis.yml#/dependencies"
+                    }
+                  ]
+                }
+              ],
+              "partialFingerprints": {
+                "discriminator/v1": "anagraphe"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "expected": [
+      "kleisis|source/unavailable|path:config/kleisis.yml|/dependencies|anagraphe"
+    ]
+  },
+  {
+    "case": "failed-run",
+    "description": "a run that failed before its analysis began omits results, beside a complete run of another tool",
+    "log": {
+      "version": "2.1.0",
+      "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+      "runs": [
+        {
+          "tool": {
+            "driver": {
+              "name": "kleisis",
+              "version": "0.0.0"
+            }
+          },
+          "columnKind": "unicodeCodePoints",
+          "invocations": [
+            {
+              "executionSuccessful": false,
+              "toolExecutionNotifications": [
+                {
+                  "level": "error",
+                  "message": {
+                    "text": "the record cannot be read"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "tool": {
+            "driver": {
+              "name": "ekthesis",
+              "version": "0.0.0"
+            }
+          },
+          "columnKind": "unicodeCodePoints",
+          "invocations": [
+            {
+              "executionSuccessful": true
+            }
+          ],
+          "results": [
+            {
+              "ruleId": "schema-conformance",
+              "level": "error",
+              "message": {
+                "text": "finding"
+              },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": {
+                      "uri": "records/a.yml",
+                      "uriBaseId": "SRCROOT"
+                    }
+                  },
+                  "logicalLocations": [
+                    {
+                      "name": "path:records/a.yml"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "expected": [
+      "ekthesis|schema-conformance|path:records/a.yml"
+    ]
   }
 ]

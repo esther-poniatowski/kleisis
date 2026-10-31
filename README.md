@@ -111,10 +111,14 @@ The three commands keep writes separate from checks:
 
 Each command accepts the record-path option `--record` when the resource record does not use its default path.
 
-The commands `validate` and `check` also accept the option `--format sarif`. The command then writes a SARIF 2.1.0 log on standard output, in the findings profile of the gate Elenchos. The build stops at its first failure, so the log holds one result for that failure, or one per item when the failure lists several; `check` adds one result per generated output that differs. A successful run yields a log without result. The line on standard error and the exit status stay unchanged. The [findings output](docs/adr/findings-output.md) lists the rules and records the choices:
+The commands `validate` and `check` also accept the option `--format sarif`. The command then writes a SARIF 2.1.0 log on standard output, in the findings profile of the gate Elenchos. The build stops at its first failure, so the log holds one result for that failure, or one per item when the failure lists several; `check` adds one result per generated output that differs. A successful run yields a log without result. The line on standard error and the exit status stay unchanged.
+
+The log also states whether the run is complete. A run stopped at its first failure, or by an operating-system error, declares a failed invocation whose notification states why it stopped. An operating-system error yields no result.
+
+The option `--output PATH` writes the log to a file instead of standard output, for a caller that runs the command without a shell, such as the gate. The command creates the missing parent directories, and exits with status 2 when it cannot write the log. The [findings output](docs/adr/findings-output.md) lists the rules and records the choices:
 
 ```console
-kleisis check --root . --format sarif > kleisis.sarif
+kleisis check --root . --format sarif --output build/elenchos/kleisis.sarif
 ```
 
 No command fetches a URI. Each command fails, naming the URI and the referring file, in two cases:
