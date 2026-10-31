@@ -927,7 +927,7 @@
           ],
           "results": [
             {
-              "ruleId": "schema-conformance",
+              "ruleId": "unique-identifiers",
               "level": "error",
               "message": {
                 "text": "finding"
@@ -953,7 +953,7 @@
       ]
     },
     "expected": [
-      "ekthesis|schema-conformance|path:records/a.yml"
+      "ekthesis|unique-identifiers|path:records/a.yml"
     ]
   }
 ]
