@@ -27,7 +27,7 @@ The package separates contract semantics from external effects:
 | `domain` | defines records and registries; reads structured files; resolves schema links | standard library and structured-file parser |
 | `application` | materializes sources; composes registries; checks drift | domain and declared ports |
 | `infrastructure` | acquires sources; checks files; replaces outputs | application ports and domain objects |
-| `cli` | maps commands and diagnostics to the application service | application service |
+| `cli` | maps commands to the application service, and writes each failure as a line or as a SARIF result | application service and findings |
 
 The source-provider port keeps machine access outside the application rules. Therefore, tests can supply fixed trees through that port. However, canonical resource records still reject local checkout paths.
 
