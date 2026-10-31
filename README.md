@@ -1,6 +1,6 @@
 # Kleisis
 
-Kleisis is a deterministic schema-closure materializer. It lets a consumer repository reproduce a local set of schema contracts. That local set contains owned files and exact external files. A relative `$ref` connects files from the directory of its containing schema. A vault-rooted `$ref` connects files from the source root. Finally, the generated registry maps each contract identifier to one file.
+Kleisis is a deterministic schema-closure materializer. It lets a consumer repository reproduce a local set of schema contracts. That local set contains owned files and exact external files. A relative `$ref` connects files from the directory of its containing schema. An absolute `$ref` connects files by the `$id` that they declare, including files of another declared dependency. Finally, the generated registry maps each contract identifier and each absolute `$id` to one file.
 
 Runtime consumers need only these local files. To reproduce the same state, the resource record fixes each external source by a full Git commit or an artifact digest.
 
@@ -68,6 +68,21 @@ GitHub rejects a `Bearer` header over Git. Then, Git prompts for a user name.
 
 The optional `archive_roots` list restricts a Git archive to the repository-relative files and directories that can contain the registry and its schema closure. Git interprets every entry as a literal path. The list must be non-empty, unique and in path order. Closure validation fails when the list omits a selected schema or one of its references. An absent list archives the complete source state.
 
+A dependency also supplies the files that absolute references name. Kleisis compares an absolute `$ref` with each `$id` as an exact string, and accepts any URI scheme. When no file of the referring source declares that `$id`, Kleisis looks it up in the `resources` maps of the declared dependency registries, in declaration order. Kleisis then materializes the mapped file and its closure like a selected contract.
+
+A dependency may select no contract, by an empty or absent `contracts` list. Such a dependency supplies only the `resources` map of its registry, such as the source of the addressing primitives, cited by absolute `$id`:
+
+```yaml
+  - id: anagraphe
+    source:
+      kind: git
+      repository: https://github.com/esther-poniatowski/anagraphe.git
+      commit: 0123456789abcdef0123456789abcdef01234567
+    registry: specs/schema-registry.yml
+```
+
+A vault-rooted `$ref`, which starts with `/`, is resolved by Ekphrasis from the root of the consumer vault, not from the root of the source of its file. Therefore, no file of an export closure and no materialized file may hold a vault-rooted `$ref`. An export closure holds the files reached from the exports and from the owned files mapped by `resources`. A reference across sources uses an absolute `$id` instead. A vault-rooted `$ref` stays admitted in an owned file outside every export closure.
+
 Tar archives contribute regular files and directories only. A link with a valid member path is omitted, while an invalid member path still invalidates the archive. Retained ZIP artifacts reject symbolic links. Therefore, a selected registry or schema supplied only through a link remains absent and fails validation.
 
 The optional key `paths` overrides three repository-relative paths:
@@ -96,6 +111,13 @@ The three commands keep writes separate from checks:
 
 Each command accepts the record-path option `--record` when the resource record does not use its default path.
 
+No command fetches a URI. Each command fails, naming the URI and the referring file, in two cases:
+
+- no file of the referring source and no declared dependency maps an absolute `$ref`;
+- two dependencies map one absolute `$ref` to different bytes.
+
+Each command also fails, naming the dependency, when a dependency selects no contract and either its registry is of version 1 or no reference of the closure reaches any of its resources. Finally, each command fails, naming the file and the reference, when a file of an export closure or a materialized file holds a vault-rooted `$ref`.
+
 These commands validate the closure through Kleisis's resolver. The separate consumer qualification gate must still prove that the released Ekphrasis bundle loads every exported schema.
 
 ## Generated state
@@ -104,11 +126,17 @@ The materialization command writes two consumer outputs and one receipt:
 
 | Output | Version-control status | Function |
 | --- | --- | --- |
-| `.schema-resources/` | ignored | stores exact external schemas and their relative and vault-rooted reference closure |
+| `.schema-resources/` | ignored | stores exact external schemas and their reference closure across declared dependencies |
 | `.schema-resources/receipt.yml` | ignored | records each exact source and copied-file digest |
-| `specs/schema-registry.yml` | tracked | maps owned, selected external and imported child identifiers to local paths |
+| `specs/schema-registry.yml` | tracked | maps owned, selected external and imported child identifiers, and each absolute `$id`, to local paths |
 
-The generated registry lists only project-owned identifiers under the key `exports`. By contrast, the key `schemas` can include a dependency identifier outside the export set.
+The generated registry declares `schema_version: 2` and holds three keys:
+
+- `schemas` maps each contract identifier to its file, including a dependency identifier outside the export set;
+- `exports` lists only project-owned identifiers;
+- `resources` maps each absolute `$id` string, exactly as written in a schema file, to the repository-relative path of that file.
+
+The key `resources` covers every owned or materialized schema file whose root declares an absolute `$id`, which starts with a URI scheme. Two files may declare one `$id` only with identical bytes. Kleisis still reads a registry of version 1, which has no `resources` key, in a dependency or a child repository. The [closure across sources](docs/adr/closure-across-sources.md) records this format.
 
 An owned contract uses the root path `properties._schema.const` to state its identifier. Its root `required` list must also name `_schema`. The resource record must export every contract with both entries. A file with neither entry remains an owned support schema. The support schema can still serve a `$ref`. A file with only one entry or an invalid value fails the command.
 
@@ -130,7 +158,10 @@ The materialization command treats each child registry and dependency closure as
 - an invalid or incomplete child reference closure;
 - duplicate exports across repositories;
 - a child dependency absent from the parent registry;
-- different bytes for one shared contract.
+- different bytes for one shared contract;
+- different bytes for one absolute `$id` in the parent and a child `resources` map.
+
+The parent imports each child `resources` entry under the child path, unless the parent already maps that `$id`.
 
 ## Design
 
@@ -139,6 +170,8 @@ The [architecture and invariants](docs/architecture.md) specify three properties
 - permitted dependencies between modules;
 - how Kleisis follows the keyword `$ref`;
 - how Kleisis replaces both outputs safely.
+
+The [decision records](docs/adr/_index.md) fix the formats and the rules that bind later changes.
 
 ## Development
 

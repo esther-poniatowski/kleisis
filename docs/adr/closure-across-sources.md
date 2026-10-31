@@ -1,0 +1,111 @@
+# Closure across sources
+
+**Status**: Proposed. It implements step 0 of the draft decision of Geonexus on tool roles, and is accepted with it.
+
+## Problem
+
+A tool can publish a base schema with an absolute `$id`, such as `https://example.org/schemas/label`. A schema in another source can then cite that base schema by its `$id`. Before this decision, Kleisis closed references inside one source. An absolute `$ref` had to match the `$id` of a file loaded from the same source through file paths. A citation into another source therefore failed. Moreover, the generated registry did not record which local file declares each absolute `$id`, so a loader could not resolve such a `$ref` without a resolver of its own.
+
+## Decision
+
+The decision has four parts: a registry format, a resolution rule, a dependency that supplies resources only, and the exclusion of vault-rooted references across sources.
+
+### Registry format version 2
+
+Kleisis writes registries with `schema_version: 2`. The registry keeps the keys `schemas` and `exports`, and gains the top-level key `resources`. The `resources` key maps each absolute `$id` string, exactly as written in a schema file, to the repository-relative path of that file. An absolute `$id` starts with a URI scheme. The map covers every schema file of the registry closure:
+
+- every owned schema file whose root declares an absolute `$id`, whether a contract or a support schema;
+- every materialized file whose root declares an absolute `$id`;
+- in a composite registry, every entry of a child `resources` map, prefixed with the child path.
+
+Two files may declare one `$id` only with identical bytes. Then, the first file keeps the entry: owned files precede materialized files, and the parent precedes its children. Different bytes fail the command.
+
+Kleisis still reads version 1 in dependency and child registries. Such a registry supplies no `resources` entry.
+
+### Resolution of an absolute `$ref`
+
+Kleisis compares an absolute `$ref` with each `$id` as an exact string. The `$ref` resolves in this order:
+
+1. a file of the referring source that declares that `$id`, first among loaded files, then through the source's own `resources` map;
+2. the file mapped by the `resources` of the declared dependencies, in declaration order.
+
+The referring source is the consumer for an owned file, and the dependency for a dependency file. A map entry whose file is absent from the acquired source is skipped. This rule is needed because a registry also maps the materialized files of its repository, and a source archive omits them.
+
+Kleisis materializes the resolved file and its closure like a selected contract, under the directory of the dependency that maps the file. The closure of the owned schemas starts from the exports and from every owned file in `resources`, since the registry publishes both.
+
+The command fails in three cases, and the message names the URI and the referring file:
+
+- no file of the referring source and no declared dependency maps the URI;
+- two dependencies map the URI to different bytes;
+- the mapped file declares another `$id`.
+
+Any URI scheme is accepted, and no URI is fetched. A relative `$ref` still stays inside the source of its containing file.
+
+### Dependency that supplies resources only
+
+A dependency may select no contract: its `contracts` list is then empty or absent. Kleisis acquires such a dependency so that the `resources` map of its registry serves the absolute `$ref` of the closure. The command fails, naming the dependency, in two cases:
+
+- its registry is of version 1, so it supplies no resource;
+- no reference of the closure reaches any of its resources, so the record declares a dependency that the repository does not use.
+
+### No vault-rooted reference across sources
+
+A vault-rooted `$ref` starts with `/`. Before this decision, Kleisis resolved it from the root of the source of its file, whereas Ekphrasis resolves it from the root of the consumer vault. A materialized file holding one therefore opened against another file. Hence, no file of an export closure and no materialized file holds a vault-rooted `$ref`, and a reference across sources uses an absolute `$id`.
+
+An export closure holds the files reached from the exports and from the owned files mapped by `resources`, since the registry publishes both. In a composite registry, the files reached from the exports of each child also form an export closure. The command fails with a message that names the file and the reference, and points to the absolute `$id`. A vault-rooted `$ref` in an owned file outside every export closure stays admitted: only its own vault loads that file, and Kleisis does not load it.
+
+## Options weighed
+
+### Registry format and resolution
+
+The options are compared on five criteria:
+
+- each file keeps one owner;
+- resolution reads only local files;
+- Kleisis and the loader of the consumer resolve through the same map;
+- the generated bytes are deterministic;
+- each failure names its cause.
+
+| Option | Benefit | Limitation | Verdict |
+| --- | --- | --- | --- |
+| absolute `$ref` restricted to the loaded files of one source | no map to generate | a base schema of another tool cannot be cited, so each consumer copies it and becomes a second owner | replaced |
+| relative `$ref` into the materialized directory of a dependency | no new registry key | the citing schema depends on the layout and the dependency identifiers of each consumer | rejected |
+| fetching the URI | no materialization | adds network behavior, and fails offline and on a moved host | rejected |
+| a separate generated file mapping each `$id` | the version 1 registry stays unchanged | two generated files must be published and checked together, and the loader needs a second setting | rejected |
+| a `resources` key in the registry, resolved through declared dependencies | one local map serves Kleisis and the loader; each file stays with its owner | a dependency supplies resources only from a version 2 registry; a parent and its children must agree on the bytes of every shared `$id` | selected |
+
+Two finer choices follow the same criteria. First, the referring source precedes the dependencies, so the resolution of a source's own `$id` does not depend on the dependencies selected by a consumer. Second, a duplicate `$id` with different bytes fails, rather than keeping the first file. Otherwise, a loader reading the map could select bytes against which the citing schema was never validated.
+
+### Dependency that supplies resources only
+
+The options add one criterion to the five above: the resource record declares only what the closure uses.
+
+| Option | Benefit | Limitation | Verdict |
+| --- | --- | --- | --- |
+| one contract required from every dependency | every dependency has an entrypoint | a source that publishes only base schemas, such as the addressing primitives, has no contract to select; any other source forces the consumer to select a contract that it does not use | replaced |
+| a list of the selected `$id` strings in each dependency | the record names each resource used | the list repeats the absolute `$ref` of the schemas, so each new reference needs a second edit, and the two statements can disagree | rejected |
+| an empty `contracts` list, checked against the closure | the schemas stay the only statement of the resources used | the unused dependency is detected only after the closure is built | selected |
+
+An unused dependency fails rather than being ignored. Otherwise, the record would declare a source that the closure does not use, and each command would acquire that source.
+
+### Vault-rooted references
+
+The options add one criterion to the five above: a reference designates the same file in Kleisis and in the loader of every consumer.
+
+| Option | Benefit | Limitation | Verdict |
+| --- | --- | --- | --- |
+| a vault-rooted `$ref` resolved from the root of its source by Kleisis, and from the root of the consumer vault by Ekphrasis | no change | a materialized file opens against another file, and Kleisis validates a closure that Ekphrasis does not load | replaced |
+| Ekphrasis resolves a vault-rooted `$ref` in a materialized file from the root of its materialized source | existing files keep their references | two mechanisms serve references across sources, and Ekphrasis must locate the source root of each materialized file | rejected |
+| Kleisis resolves a vault-rooted `$ref` in a materialized file from the root of the consumer | Kleisis agrees with Ekphrasis | the meaning of a published file depends on the layout of each consumer, so its producer cannot validate it | rejected |
+| no vault-rooted `$ref` in an export closure or a materialized file; a reference across sources uses an absolute `$id` | one mechanism serves references across sources; a relative `$ref` keeps its meaning, since materialization keeps the layout of the source | a schema that would use a vault-rooted `$ref` must use a relative `$ref` or an absolute `$id` | selected |
+
+The rule covers the export closure of the producer, and not only the materialized files of a consumer. Therefore, the producer detects the defect before any consumer selects the file.
+
+## Consequences
+
+- A consumer regenerates its registry at version 2, and `kleisis check` reports a version 1 registry as drift.
+- The loader of a consumer must read version 2 before the consumer publishes a version 2 registry.
+- A parent running an earlier release of Kleisis rejects a version 2 child registry. Therefore, a parent adopts this release before its children regenerate.
+- A source that publishes only base schemas, such as the addressing primitives, is declared as a dependency without contracts, and it serves only from a version 2 registry.
+- A schema of an export closure holding a vault-rooted `$ref` must switch to a relative `$ref` or an absolute `$id`. No schema of the ecosystem holds one at the date of this decision.
+- A change to the bytes of a shared `$id` requires one coordinated update of the parent and its children, as for a shared contract.
