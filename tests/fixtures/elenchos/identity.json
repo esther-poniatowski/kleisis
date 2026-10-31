@@ -1,0 +1,751 @@
+[
+  {
+    "case": "file-region",
+    "description": "a finding in a region of a file",
+    "log": {
+      "version": "2.1.0",
+      "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+      "runs": [
+        {
+          "tool": {
+            "driver": {
+              "name": "anagraphe",
+              "version": "0.0.0"
+            }
+          },
+          "columnKind": "unicodeCodePoints",
+          "results": [
+            {
+              "ruleId": "references/broken",
+              "level": "error",
+              "message": {
+                "text": "finding"
+              },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": {
+                      "uri": "docs/a.md",
+                      "uriBaseId": "SRCROOT"
+                    },
+                    "region": {
+                      "startLine": 12,
+                      "startColumn": 3
+                    }
+                  },
+                  "logicalLocations": [
+                    {
+                      "name": "path:docs/a.md#link:b.md"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "expected": [
+      "anagraphe|references/broken|path:docs/a.md|link:b.md"
+    ]
+  },
+  {
+    "case": "line-moved",
+    "description": "the finding of file-region after its line moved and its message and level changed",
+    "log": {
+      "version": "2.1.0",
+      "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+      "runs": [
+        {
+          "tool": {
+            "driver": {
+              "name": "anagraphe",
+              "version": "0.0.0"
+            }
+          },
+          "columnKind": "unicodeCodePoints",
+          "results": [
+            {
+              "ruleId": "references/broken",
+              "level": "warning",
+              "message": {
+                "text": "target b.md is missing"
+              },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": {
+                      "uri": "docs/a.md",
+                      "uriBaseId": "SRCROOT"
+                    },
+                    "region": {
+                      "startLine": 40,
+                      "startColumn": 1
+                    }
+                  },
+                  "logicalLocations": [
+                    {
+                      "name": "path:docs/a.md#link:b.md"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "expected": [
+      "anagraphe|references/broken|path:docs/a.md|link:b.md"
+    ]
+  },
+  {
+    "case": "two-tools",
+    "description": "two tools emit one ruleId at one locus",
+    "log": {
+      "version": "2.1.0",
+      "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+      "runs": [
+        {
+          "tool": {
+            "driver": {
+              "name": "ekthesis",
+              "version": "0.0.0"
+            }
+          },
+          "columnKind": "unicodeCodePoints",
+          "results": [
+            {
+              "ruleId": "schema-conformance",
+              "level": "error",
+              "message": {
+                "text": "finding"
+              },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": {
+                      "uri": "records/arg-ab12.yml",
+                      "uriBaseId": "SRCROOT"
+                    },
+                    "region": {
+                      "startLine": 9,
+                      "startColumn": 5
+                    }
+                  },
+                  "logicalLocations": [
+                    {
+                      "name": "id:arg-ab12#/relations/2/target"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "tool": {
+            "driver": {
+              "name": "gnomon",
+              "version": "0.0.0"
+            }
+          },
+          "columnKind": "unicodeCodePoints",
+          "results": [
+            {
+              "ruleId": "schema-conformance",
+              "level": "error",
+              "message": {
+                "text": "finding"
+              },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": {
+                      "uri": "records/arg-ab12.yml",
+                      "uriBaseId": "SRCROOT"
+                    },
+                    "region": {
+                      "startLine": 9,
+                      "startColumn": 5
+                    }
+                  },
+                  "logicalLocations": [
+                    {
+                      "name": "id:arg-ab12#/relations/2/target"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "expected": [
+      "ekthesis|schema-conformance|id:arg-ab12|/relations/2/target",
+      "gnomon|schema-conformance|id:arg-ab12|/relations/2/target"
+    ]
+  },
+  {
+    "case": "vault-folder",
+    "description": "a finding of the vault about a folder, without region",
+    "log": {
+      "version": "2.1.0",
+      "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+      "runs": [
+        {
+          "tool": {
+            "driver": {
+              "name": "geonexus",
+              "version": "0.0.0"
+            }
+          },
+          "columnKind": "unicodeCodePoints",
+          "results": [
+            {
+              "ruleId": "structure/missing-kind",
+              "level": "error",
+              "message": {
+                "text": "finding"
+              },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": {
+                      "uri": "projects/x/",
+                      "uriBaseId": "SRCROOT"
+                    }
+                  },
+                  "logicalLocations": [
+                    {
+                      "name": "path:projects/x/"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "expected": [
+      "geonexus|structure/missing-kind|path:projects/x/"
+    ]
+  },
+  {
+    "case": "whole-file",
+    "description": "a finding about a whole file, without region",
+    "log": {
+      "version": "2.1.0",
+      "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+      "runs": [
+        {
+          "tool": {
+            "driver": {
+              "name": "geonexus",
+              "version": "0.0.0"
+            }
+          },
+          "columnKind": "unicodeCodePoints",
+          "results": [
+            {
+              "ruleId": "metadata-options/stale-metadata-options",
+              "level": "error",
+              "message": {
+                "text": "finding"
+              },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": {
+                      "uri": "utils/schemas/metadata-options.schema.yaml",
+                      "uriBaseId": "SRCROOT"
+                    }
+                  },
+                  "logicalLocations": [
+                    {
+                      "name": "path:utils/schemas/metadata-options.schema.yaml"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "expected": [
+      "geonexus|metadata-options/stale-metadata-options|path:utils/schemas/metadata-options.schema.yaml"
+    ]
+  },
+  {
+    "case": "discriminator-ordinal",
+    "description": "two discriminators at one locus, one of them repeated three times",
+    "log": {
+      "version": "2.1.0",
+      "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+      "runs": [
+        {
+          "tool": {
+            "driver": {
+              "name": "geonexus",
+              "version": "0.0.0"
+            }
+          },
+          "columnKind": "unicodeCodePoints",
+          "results": [
+            {
+              "ruleId": "glossary/forbidden-term",
+              "level": "error",
+              "message": {
+                "text": "finding"
+              },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": {
+                      "uri": "notes/n.md",
+                      "uriBaseId": "SRCROOT"
+                    },
+                    "region": {
+                      "startLine": 3,
+                      "startColumn": 1
+                    }
+                  },
+                  "logicalLocations": [
+                    {
+                      "name": "path:notes/n.md#term:competition"
+                    }
+                  ]
+                }
+              ],
+              "partialFingerprints": {
+                "discriminator/v1": "Competition"
+              }
+            },
+            {
+              "ruleId": "glossary/forbidden-term",
+              "level": "error",
+              "message": {
+                "text": "finding"
+              },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": {
+                      "uri": "notes/n.md",
+                      "uriBaseId": "SRCROOT"
+                    },
+                    "region": {
+                      "startLine": 8,
+                      "startColumn": 5
+                    }
+                  },
+                  "logicalLocations": [
+                    {
+                      "name": "path:notes/n.md#term:competition"
+                    }
+                  ]
+                }
+              ],
+              "partialFingerprints": {
+                "discriminator/v1": "competition"
+              }
+            },
+            {
+              "ruleId": "glossary/forbidden-term",
+              "level": "error",
+              "message": {
+                "text": "finding"
+              },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": {
+                      "uri": "notes/n.md",
+                      "uriBaseId": "SRCROOT"
+                    },
+                    "region": {
+                      "startLine": 2,
+                      "startColumn": 9
+                    }
+                  },
+                  "logicalLocations": [
+                    {
+                      "name": "path:notes/n.md#term:competition"
+                    }
+                  ]
+                }
+              ],
+              "partialFingerprints": {
+                "discriminator/v1": "competition"
+              }
+            },
+            {
+              "ruleId": "glossary/forbidden-term",
+              "level": "error",
+              "message": {
+                "text": "finding"
+              },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": {
+                      "uri": "notes/n.md",
+                      "uriBaseId": "SRCROOT"
+                    },
+                    "region": {
+                      "startLine": 20,
+                      "startColumn": 1
+                    }
+                  },
+                  "logicalLocations": [
+                    {
+                      "name": "path:notes/n.md#term:competition"
+                    }
+                  ]
+                }
+              ],
+              "partialFingerprints": {
+                "discriminator/v1": "competition"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "expected": [
+      "geonexus|glossary/forbidden-term|path:notes/n.md|term:competition|Competition",
+      "geonexus|glossary/forbidden-term|path:notes/n.md|term:competition|competition|2",
+      "geonexus|glossary/forbidden-term|path:notes/n.md|term:competition|competition",
+      "geonexus|glossary/forbidden-term|path:notes/n.md|term:competition|competition|3"
+    ]
+  },
+  {
+    "case": "repeated-link",
+    "description": "an identical link repeated without discriminator, listed out of line order",
+    "log": {
+      "version": "2.1.0",
+      "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+      "runs": [
+        {
+          "tool": {
+            "driver": {
+              "name": "geonexus",
+              "version": "0.0.0"
+            }
+          },
+          "columnKind": "unicodeCodePoints",
+          "results": [
+            {
+              "ruleId": "links/broken",
+              "level": "error",
+              "message": {
+                "text": "finding"
+              },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": {
+                      "uri": "foundations/r.md",
+                      "uriBaseId": "SRCROOT"
+                    },
+                    "region": {
+                      "startLine": 30,
+                      "startColumn": 1
+                    }
+                  },
+                  "logicalLocations": [
+                    {
+                      "name": "path:foundations/r.md#link:overlap.md"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "ruleId": "links/broken",
+              "level": "error",
+              "message": {
+                "text": "finding"
+              },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": {
+                      "uri": "foundations/r.md",
+                      "uriBaseId": "SRCROOT"
+                    },
+                    "region": {
+                      "startLine": 12,
+                      "startColumn": 1
+                    }
+                  },
+                  "logicalLocations": [
+                    {
+                      "name": "path:foundations/r.md#link:overlap.md"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "expected": [
+      "geonexus|links/broken|path:foundations/r.md|link:overlap.md||2",
+      "geonexus|links/broken|path:foundations/r.md|link:overlap.md"
+    ]
+  },
+  {
+    "case": "non-ascii-pointer",
+    "description": "a JSON Pointer locus with a non-ASCII key",
+    "log": {
+      "version": "2.1.0",
+      "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+      "runs": [
+        {
+          "tool": {
+            "driver": {
+              "name": "geonexus",
+              "version": "0.0.0"
+            }
+          },
+          "columnKind": "unicodeCodePoints",
+          "results": [
+            {
+              "ruleId": "glossary/gloss-form",
+              "level": "error",
+              "message": {
+                "text": "finding"
+              },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": {
+                      "uri": "specs/vocabulary/tasks.yml",
+                      "uriBaseId": "SRCROOT"
+                    },
+                    "region": {
+                      "startLine": 14,
+                      "startColumn": 7
+                    }
+                  },
+                  "logicalLocations": [
+                    {
+                      "name": "path:specs/vocabulary/tasks.yml#/tasks/priorities/\u23eb/gloss"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "expected": [
+      "geonexus|glossary/gloss-form|path:specs/vocabulary/tasks.yml|/tasks/priorities/\u23eb/gloss"
+    ]
+  },
+  {
+    "case": "identifier-discriminator",
+    "description": "a record identifier as resource, with a discriminator",
+    "log": {
+      "version": "2.1.0",
+      "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+      "runs": [
+        {
+          "tool": {
+            "driver": {
+              "name": "geonexus",
+              "version": "0.0.0"
+            }
+          },
+          "columnKind": "unicodeCodePoints",
+          "results": [
+            {
+              "ruleId": "glossary/undeclared-concept",
+              "level": "warning",
+              "message": {
+                "text": "finding"
+              },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": {
+                      "uri": "audiences/artificial-networks-researchers.yml",
+                      "uriBaseId": "SRCROOT"
+                    },
+                    "region": {
+                      "startLine": 6,
+                      "startColumn": 5
+                    }
+                  },
+                  "logicalLocations": [
+                    {
+                      "name": "id:artificial-networks-researchers#/knowledge/0/undeclared"
+                    }
+                  ]
+                }
+              ],
+              "partialFingerprints": {
+                "discriminator/v1": "machine learning"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "expected": [
+      "geonexus|glossary/undeclared-concept|id:artificial-networks-researchers|/knowledge/0/undeclared|machine learning"
+    ]
+  },
+  {
+    "case": "pointer-escapes",
+    "description": "the escapes ~1 and ~0 of a JSON Pointer are kept",
+    "log": {
+      "version": "2.1.0",
+      "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+      "runs": [
+        {
+          "tool": {
+            "driver": {
+              "name": "geonexus",
+              "version": "0.0.0"
+            }
+          },
+          "columnKind": "unicodeCodePoints",
+          "results": [
+            {
+              "ruleId": "example/key",
+              "level": "error",
+              "message": {
+                "text": "finding"
+              },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": {
+                      "uri": "a.yml",
+                      "uriBaseId": "SRCROOT"
+                    },
+                    "region": {
+                      "startLine": 1,
+                      "startColumn": 1
+                    }
+                  },
+                  "logicalLocations": [
+                    {
+                      "name": "path:a.yml#/a~1b/c~0d"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "expected": [
+      "geonexus|example/key|path:a.yml|/a~1b/c~0d"
+    ]
+  },
+  {
+    "case": "hash-and-pipe",
+    "description": "a # in the path of the resource, a | in the link target",
+    "log": {
+      "version": "2.1.0",
+      "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+      "runs": [
+        {
+          "tool": {
+            "driver": {
+              "name": "geonexus",
+              "version": "0.0.0"
+            }
+          },
+          "columnKind": "unicodeCodePoints",
+          "results": [
+            {
+              "ruleId": "anagraphe-x/broken",
+              "level": "error",
+              "message": {
+                "text": "finding"
+              },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": {
+                      "uri": "docs/notes%23old.md",
+                      "uriBaseId": "SRCROOT"
+                    },
+                    "region": {
+                      "startLine": 4,
+                      "startColumn": 2
+                    }
+                  },
+                  "logicalLocations": [
+                    {
+                      "name": "path:docs/notes%23old.md#link:foo|bar.md"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "expected": [
+      "geonexus|anagraphe-x/broken|path:docs/notes#old.md|link:foo%7Cbar.md"
+    ]
+  },
+  {
+    "case": "decomposed-unicode",
+    "description": "a decomposed accent in the path is composed to NFC",
+    "log": {
+      "version": "2.1.0",
+      "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+      "runs": [
+        {
+          "tool": {
+            "driver": {
+              "name": "geonexus",
+              "version": "0.0.0"
+            }
+          },
+          "columnKind": "unicodeCodePoints",
+          "results": [
+            {
+              "ruleId": "example/nfc",
+              "level": "error",
+              "message": {
+                "text": "finding"
+              },
+              "locations": [
+                {
+                  "physicalLocation": {
+                    "artifactLocation": {
+                      "uri": "docs/cafe%CC%81.md",
+                      "uriBaseId": "SRCROOT"
+                    }
+                  },
+                  "logicalLocations": [
+                    {
+                      "name": "path:docs/cafe\u0301.md"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "expected": [
+      "geonexus|example/nfc|path:docs/caf\u00e9.md"
+    ]
+  }
+]

@@ -13,6 +13,18 @@ import yaml
 
 from kleisis.domain.documents import load_document
 from kleisis.errors import ReferenceError
+from kleisis.findings import (
+    REFERENCE_CHAIN_TOO_LONG,
+    REFERENCE_CONFLICTING_BYTES,
+    REFERENCE_IDENTIFIER_MISMATCH,
+    REFERENCE_LEAVES_SOURCE,
+    REFERENCE_TARGET_ABSENT,
+    REFERENCE_UNMAPPED,
+    REFERENCE_VAULT_ROOTED,
+    SCHEMA_UNREADABLE,
+    link,
+    pointer,
+)
 
 _URI = re.compile(r"^[a-z][a-z0-9+.-]*:", re.IGNORECASE)
 _ASCII_ARRAY_INDEX = re.compile(r"^[0-9]+$")
@@ -51,7 +63,9 @@ def _document(path: Path) -> Any:
     try:
         return load_document(path)
     except (OSError, TypeError, ValueError, yaml.YAMLError) as exc:
-        raise ReferenceError(f"cannot read schema {path}: {exc}") from exc
+        raise ReferenceError(
+            f"cannot read schema {path}: {exc}", rule=SCHEMA_UNREADABLE, subject=path
+        ) from exc
 
 
 def _objects(value: Any, active: set[int] | None = None) -> list[dict[str, Any]]:
@@ -60,7 +74,7 @@ def _objects(value: Any, active: set[int] | None = None) -> list[dict[str, Any]]
     if isinstance(value, (dict, list)):
         identity = id(value)
         if identity in active:
-            raise ReferenceError("schema contains a recursive YAML alias")
+            raise ReferenceError("schema contains a recursive YAML alias", rule=SCHEMA_UNREADABLE)
         active.add(identity)
     try:
         if isinstance(value, dict):
@@ -128,12 +142,16 @@ def _label(source: SchemaSource, path: Path) -> str:
 
 def _resolve_identifier(
     uri: str,
+    reference: str,
     source: SchemaSource,
     referrer: Path,
     declared: dict[tuple[Path, str], Path],
     dependencies: Sequence[SchemaSource],
 ) -> tuple[SchemaSource, Path]:
-    """Resolve an absolute ``$ref`` in the current source first, then in the dependencies."""
+    """Resolve an absolute ``$ref`` in the current source first, then in the dependencies.
+
+    ``reference`` is the ``$ref`` as written in ``referrer``, which a failure reports.
+    """
     loaded = declared.get((source.root.resolve(), uri))
     if loaded is not None:
         return source, loaded
@@ -153,14 +171,20 @@ def _resolve_identifier(
         )
         raise ReferenceError(
             f"neither its source nor a declared dependency maps $ref {uri!r} in "
-            f"{_label(source, referrer)}{absent}"
+            f"{_label(source, referrer)}{absent}",
+            rule=REFERENCE_UNMAPPED,
+            subject=referrer,
+            locus=link(reference),
         )
     first, first_path = present[0]
     for other, other_path in present[1:]:
         if other_path.read_bytes() != first_path.read_bytes():
             raise ReferenceError(
                 f"dependencies {first.name} and {other.name} map $ref {uri!r} in "
-                f"{_label(source, referrer)} to different bytes"
+                f"{_label(source, referrer)} to different bytes",
+                rule=REFERENCE_CONFLICTING_BYTES,
+                subject=referrer,
+                locus=link(reference),
             )
     return first, first_path.resolve()
 
@@ -183,12 +207,20 @@ def _locate(
         target = _resolve_file(current_path, location)
     document = documents.get(target) if target is not None else None
     if target is None or document is None:
-        raise ReferenceError(f"$ref designates no loaded schema file: {reference!r}")
-    value = (
-        _resolve_pointer(document, fragment, reference)
-        if fragment == "" or fragment.startswith("/")
-        else _find_anchor(document, fragment, reference)
-    )
+        raise ReferenceError(
+            f"$ref designates no loaded schema file: {reference!r}",
+            subject=current_path,
+            locus=link(reference),
+        )
+    try:
+        value = (
+            _resolve_pointer(document, fragment, reference)
+            if fragment == "" or fragment.startswith("/")
+            else _find_anchor(document, fragment, reference)
+        )
+    except ReferenceError as exc:
+        exc.locate(current_path, link(reference))
+        raise
     return value, target
 
 
@@ -210,7 +242,12 @@ def _validate_reference_chains(
                     current["$ref"], current_path, owners, documents, targets
                 )
             else:
-                raise ReferenceError(f"$ref chain from {path} exceeds {_MAX_REFERENCE_CHAIN} steps")
+                raise ReferenceError(
+                    f"$ref chain from {path} exceeds {_MAX_REFERENCE_CHAIN} steps",
+                    rule=REFERENCE_CHAIN_TOO_LONG,
+                    subject=path,
+                    locus=link(schema["$ref"]),
+                )
 
 
 def source_closure(
@@ -231,25 +268,46 @@ def source_closure(
     owners: dict[Path, SchemaSource] = {}
     declared: dict[tuple[Path, str], Path] = {}
     targets: dict[tuple[Path, str], Path] = {}
-    pending = [(source, path.resolve()) for source, path in entrypoints]
-    absolute: list[tuple[SchemaSource, Path, str]] = []
+    # Each pending file carries the file and the ``$ref`` that reached it, or nothing for an
+    # entrypoint, so that a failure names the reference that designates the file.
+    pending: list[tuple[SchemaSource, Path, Path | None, str]] = [
+        (source, path.resolve(), None, "") for source, path in entrypoints
+    ]
+    absolute: list[tuple[SchemaSource, Path, str, str]] = []
     while pending or absolute:
         while pending:
-            source, path = pending.pop(0)
+            source, path, referrer, written = pending.pop(0)
             if path in owners:
                 continue
+            subject = path if referrer is None else referrer
+            locus = "" if referrer is None else link(written)
             root = source.root.resolve()
             if not path.is_relative_to(root):
-                raise ReferenceError(f"schema target leaves its source: {path}")
+                raise ReferenceError(
+                    f"schema target leaves its source: {path}",
+                    rule=REFERENCE_LEAVES_SOURCE,
+                    subject=subject,
+                    locus=locus,
+                )
             if not path.is_file() or path.is_symlink():
-                raise ReferenceError(f"schema target is not a regular source file: {path}")
+                raise ReferenceError(
+                    f"schema target is not a regular source file: {path}",
+                    rule=REFERENCE_TARGET_ABSENT,
+                    subject=subject,
+                    locus=locus,
+                )
             document = _document(path)
+            try:
+                schemas = _objects(document)
+            except ReferenceError as exc:
+                exc.locate(path)
+                raise
             documents[path] = document
             owners[path] = source
             identifier = root_identifier(document)
             if identifier is not None:
                 declared.setdefault((root, identifier), path)
-            for schema in _objects(document):
+            for schema in schemas:
                 reference = schema.get("$ref")
                 if not isinstance(reference, str):
                     continue
@@ -257,36 +315,48 @@ def source_closure(
                 if not location:
                     continue
                 if _URI.match(location):
-                    absolute.append((source, path, location))
+                    absolute.append((source, path, location, reference))
                     continue
                 if location.startswith("/"):
                     raise ReferenceError(
                         f"vault-rooted $ref {reference!r} in {_label(source, path)} is not "
                         "admitted in a published or materialized file; cite the target by "
-                        "its absolute $id"
+                        "its absolute $id",
+                        rule=REFERENCE_VAULT_ROOTED,
+                        subject=path,
+                        locus=link(reference),
                     )
                 target = _resolve_file(path, location)
                 if not target.is_relative_to(root):
-                    raise ReferenceError(f"schema target leaves its source: {target}")
+                    raise ReferenceError(
+                        f"schema target leaves its source: {target}",
+                        rule=REFERENCE_LEAVES_SOURCE,
+                        subject=path,
+                        locus=link(reference),
+                    )
                 if target not in owners:
-                    pending.append((source, target))
+                    pending.append((source, target, path, reference))
         unresolved, absolute = absolute, []
-        for source, referrer, uri in unresolved:
+        for source, referrer, uri, reference in unresolved:
             key = (source.root.resolve(), uri)
             if key in targets:
                 continue
             target_source, target = _resolve_identifier(
-                uri, source, referrer, declared, dependencies
+                uri, reference, source, referrer, declared, dependencies
             )
             targets[key] = target
             if target not in owners:
-                pending.append((target_source, target))
+                pending.append((target_source, target, referrer, reference))
     for (_, uri), target in sorted(targets.items(), key=lambda item: item[0][1]):
         identifier = root_identifier(documents[target])
         if identifier != uri:
             raise ReferenceError(
                 f"resources map $ref {uri!r} to {_label(owners[target], target)}, "
-                f"which declares $id {identifier!r}"
+                f"which declares $id {identifier!r}",
+                rule=REFERENCE_IDENTIFIER_MISMATCH,
+                subject=target,
+                locus=pointer("$id"),
+                discriminator=uri,
             )
     _validate_reference_chains(owners, documents, targets)
     return owners

@@ -3,28 +3,53 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePath, PurePosixPath
 from typing import Literal
 
 from kleisis.errors import RecordError
+from kleisis.findings import PATH_ESCAPE, field_pointer
 
 
 def safe_relative_path(value: object, field_name: str) -> PurePosixPath:
     """Return a normalized repository-relative path."""
     if not isinstance(value, str) or not value.strip():
-        raise RecordError(f"{field_name} must be a non-empty string")
+        raise RecordError(
+            f"{field_name} must be a non-empty string", locus=field_pointer(field_name)
+        )
     path = PurePosixPath(value)
     if path.is_absolute() or ".." in path.parts or path == PurePosixPath("."):
-        raise RecordError(f"{field_name} must stay inside the repository: {value!r}")
+        raise RecordError(
+            f"{field_name} must stay inside the repository: {value!r}",
+            rule=PATH_ESCAPE,
+            locus=field_pointer(field_name),
+        )
     return path
 
 
-def resolve_inside(root: Path, relative: PurePosixPath, field_name: str) -> Path:
-    """Resolve a relative path and prove that it stays under ``root``."""
+def resolve_inside(
+    root: Path,
+    relative: PurePosixPath,
+    field_name: str,
+    *,
+    subject: PurePath | None = None,
+    locus: str = "",
+    discriminator: str = "",
+) -> Path:
+    """Resolve a relative path and prove that it stays under ``root``.
+
+    ``subject``, ``locus`` and ``discriminator`` name the declaration of the path, which the
+    failure reports.
+    """
     resolved_root = root.resolve()
     resolved = (resolved_root / Path(relative)).resolve()
     if not resolved.is_relative_to(resolved_root):
-        raise RecordError(f"{field_name} leaves the repository: {relative}")
+        raise RecordError(
+            f"{field_name} leaves the repository: {relative}",
+            rule=PATH_ESCAPE,
+            subject=subject,
+            locus=locus,
+            discriminator=discriminator,
+        )
     return resolved
 
 

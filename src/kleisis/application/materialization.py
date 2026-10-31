@@ -17,8 +17,15 @@ from kleisis.domain.models import (
     resolve_inside,
 )
 from kleisis.domain.references import SchemaSource, source_closure
-from kleisis.domain.registry import load_registry, schema_identifier
+from kleisis.domain.registry import BINDING_LOCUS, load_registry, schema_identifier
 from kleisis.errors import RegistryError
+from kleisis.findings import (
+    CONTRACT_BINDING_MISMATCH,
+    CONTRACT_UNPROVIDED,
+    DEPENDENCY_NO_RESOURCES,
+    Finding,
+    pointer,
+)
 from kleisis.infrastructure.filesystem import copy_file, digest
 
 
@@ -83,30 +90,50 @@ def acquire_dependency(
     """Acquire one exact source and check its registry and selected contract bindings.
 
     A dependency that selects no contract supplies only resources, so its registry must be of
-    version 2 or later.
+    version 2 or later. A failure of the declaration in the record is raised without subject,
+    for the caller to name the record.
     """
     dependency = record.dependencies[dependency_index]
     source_root = work_root / dependency.id
     source_provider.acquire(dependency.source, source_root)
     source_registry_path = resolve_inside(
-        source_root, dependency.registry, f"dependencies[{dependency_index}].registry"
+        source_root,
+        dependency.registry,
+        f"dependencies[{dependency_index}].registry",
     )
     source_registry = load_registry(source_registry_path)
     if not dependency.contracts and source_registry.schema_version < 2:
         raise RegistryError(
             f"dependency {dependency.id} selects no contract, and its registry of version "
-            f"{source_registry.schema_version} supplies no resources"
+            f"{source_registry.schema_version} supplies no resources",
+            rule=DEPENDENCY_NO_RESOURCES,
+            locus=pointer("dependencies"),
+            discriminator=dependency.id,
         )
     missing = sorted(set(dependency.contracts) - set(source_registry.schemas))
     if missing:
-        raise RegistryError(
+        message = (
             f"dependency {dependency.id} does not provide selected contracts: {', '.join(missing)}"
+        )
+        raise RegistryError(
+            message,
+            findings=[
+                Finding(
+                    rule=CONTRACT_UNPROVIDED,
+                    message=f"dependency {dependency.id} does not provide {identifier}",
+                    locus=pointer("dependencies"),
+                    discriminator=identifier,
+                )
+                for identifier in missing
+            ],
         )
     entrypoints = tuple(
         resolve_inside(
             source_root,
             source_registry.schemas[identifier],
             f"dependency {dependency.id} contract {identifier}",
+            subject=source_registry_path,
+            locus=pointer("schemas", identifier),
         )
         for identifier in dependency.contracts
     )
@@ -115,10 +142,19 @@ def acquire_dependency(
         if declared != identifier:
             raise RegistryError(
                 f"dependency {dependency.id} registry maps {identifier!r} to a schema "
-                f"declaring {declared!r}"
+                f"declaring {declared!r}",
+                rule=CONTRACT_BINDING_MISMATCH,
+                subject=entrypoint,
+                locus=BINDING_LOCUS,
             )
     resources = {
-        uri: resolve_inside(source_root, target, f"dependency {dependency.id} resource {uri}")
+        uri: resolve_inside(
+            source_root,
+            target,
+            f"dependency {dependency.id} resource {uri}",
+            subject=source_registry_path,
+            locus=pointer("resources", uri),
+        )
         for uri, target in source_registry.resources.items()
     }
     return AcquiredDependency(

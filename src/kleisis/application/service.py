@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -24,12 +26,26 @@ from kleisis.domain.models import (
 from kleisis.domain.records import load_resource_record
 from kleisis.domain.references import SchemaSource, source_closure
 from kleisis.domain.registry import (
+    BINDING_LOCUS,
     candidate_schemas,
     discover_owned_schemas,
     registry_bytes,
     resource_map,
 )
-from kleisis.errors import DriftError, RegistryError
+from kleisis.errors import DriftError, RegistryError, SchemaClosureError
+from kleisis.findings import (
+    CONTRACT_DUPLICATE,
+    CONTRACT_UNEXPORTED,
+    CONTRACT_UNOWNED_EXPORT,
+    DEPENDENCY_UNUSED,
+    DRIFT_REGISTRY,
+    DRIFT_RESOURCES,
+    RECORD_PATH_OVERLAP,
+    Finding,
+    complete,
+    pointer,
+    relocate,
+)
 from kleisis.infrastructure.filesystem import copy_tree, tree_manifest
 from kleisis.infrastructure.publication import publish_pair, recover_transaction
 from kleisis.infrastructure.sources import ExactSourceProvider
@@ -59,6 +75,21 @@ def _paths_overlap(first: PurePosixPath, second: PurePosixPath) -> bool:
     return first == second or first in second.parents or second in first.parents
 
 
+@contextmanager
+def _relocated(roots: Sequence[tuple[Path, PurePosixPath]]) -> Iterator[None]:
+    """Report the subject of each failure below one of ``roots`` by its repository path."""
+    ordered = sorted(
+        ((base.resolve(), target) for base, target in roots),
+        key=lambda root: len(root[0].parts),
+        reverse=True,
+    )
+    try:
+        yield
+    except SchemaClosureError as exc:
+        exc.map_findings(lambda finding: relocate(finding, ordered))
+        raise
+
+
 class SchemaClosureService:
     """Build, publish, and verify the schema closure of one repository."""
 
@@ -72,7 +103,9 @@ class SchemaClosureService:
 
     def load(self, project_root: Path) -> ResourceRecord:
         """Load the resource record selected for a project root."""
-        record = load_resource_record(resolve_inside(project_root, self.record_path, "record path"))
+        record = load_resource_record(
+            resolve_inside(project_root, self.record_path, "record path", subject=self.record_path)
+        )
         protected = {
             "paths.owned_schemas": record.paths.owned_schemas,
             "paths.registry": record.paths.registry,
@@ -80,79 +113,170 @@ class SchemaClosureService:
         }
         for name, path in protected.items():
             if _paths_overlap(record.paths.resources, path):
-                raise RegistryError(f"paths.resources overlaps {name}: {path}")
+                raise RegistryError(
+                    f"paths.resources overlaps {name}: {path}",
+                    rule=RECORD_PATH_OVERLAP,
+                    subject=self.record_path,
+                    locus=pointer("paths", "resources"),
+                    discriminator=path.as_posix(),
+                )
         if record.paths.registry == self.record_path:
-            raise RegistryError("paths.registry must differ from the resource record")
+            raise RegistryError(
+                "paths.registry must differ from the resource record",
+                rule=RECORD_PATH_OVERLAP,
+                subject=self.record_path,
+                locus=pointer("paths", "registry"),
+            )
         for project in record.projects:
             if _paths_overlap(record.paths.resources, project.path):
-                raise RegistryError(f"paths.resources overlaps project checkout: {project.path}")
+                raise RegistryError(
+                    f"paths.resources overlaps project checkout: {project.path}",
+                    rule=RECORD_PATH_OVERLAP,
+                    subject=self.record_path,
+                    locus=pointer("paths", "resources"),
+                    discriminator=project.path.as_posix(),
+                )
         return record
+
+    @contextmanager
+    def _reported(self, project_root: Path) -> Iterator[None]:
+        """Give each failure of a command a repository-relative subject."""
+        try:
+            with _relocated([(project_root, PurePosixPath("."))]):
+                yield
+        except SchemaClosureError as exc:
+            exc.map_findings(lambda finding: complete(finding, self.record_path))
+            raise
 
     def build(self, project_root: Path, staging_parent: Path | None = None) -> CandidateState:
         """Build a complete candidate state without modifying the project."""
         root = project_root.resolve()
         record = self.load(root)
-        owned_root = resolve_inside(root, record.paths.owned_schemas, "paths.owned_schemas")
-        owned = discover_owned_schemas(root, owned_root)
+        owned_root = resolve_inside(
+            root,
+            record.paths.owned_schemas,
+            "paths.owned_schemas",
+            subject=self.record_path,
+            locus=pointer("paths", "owned_schemas"),
+        )
+        try:
+            owned = discover_owned_schemas(root, owned_root)
+        except SchemaClosureError as exc:
+            exc.locate(self.record_path)
+            raise
         undeclared_exports = sorted(set(record.exports) - set(owned))
         if undeclared_exports:
             raise RegistryError(
-                f"exports are not owned by this repository: {', '.join(undeclared_exports)}"
+                f"exports are not owned by this repository: {', '.join(undeclared_exports)}",
+                findings=[
+                    Finding(
+                        rule=CONTRACT_UNOWNED_EXPORT,
+                        message=f"export {identifier} is not owned by this repository",
+                        subject=self.record_path,
+                        locus=pointer("exports"),
+                        discriminator=identifier,
+                    )
+                    for identifier in undeclared_exports
+                ],
             )
         unexported_contracts = sorted(set(owned) - set(record.exports))
         if unexported_contracts:
             raise RegistryError(
-                f"owned contracts are absent from exports: {', '.join(unexported_contracts)}"
+                f"owned contracts are absent from exports: {', '.join(unexported_contracts)}",
+                findings=[
+                    Finding(
+                        rule=CONTRACT_UNEXPORTED,
+                        message=f"owned contract {identifier} is absent from exports",
+                        subject=owned[identifier],
+                        locus=BINDING_LOCUS,
+                    )
+                    for identifier in unexported_contracts
+                ],
             )
 
         parent = staging_parent or root.parent
         stage = Path(tempfile.mkdtemp(prefix="kleisis-stage-", dir=parent))
+        resources_stage = stage / "resources"
+        work_root = stage / "sources"
+        validation_root = stage / "validation"
+        staging_roots = [
+            (resources_stage, record.paths.resources),
+            (validation_root, PurePosixPath(".")),
+            *(
+                (work_root / dependency.id, record.paths.resources / dependency.id)
+                for dependency in record.dependencies
+            ),
+        ]
         try:
-            resources_stage = stage / "resources"
-            work_root = stage / "sources"
-            work_root.mkdir()
-            acquired = [
-                acquire_dependency(self.source_provider, record, index, work_root)
-                for index in range(len(record.dependencies))
-            ]
-            validation_root = stage / "validation"
-            requested: list[tuple[SchemaSource, Path]] = []
-            while True:
-                materialized, external = self._materialize(
-                    acquired, record, resources_stage, requested
+            with _relocated(staging_roots):
+                return self._build_in(
+                    root, record, owned, work_root, resources_stage, validation_root
                 )
-                owner_conflicts = sorted(set(owned) & set(external))
-                if owner_conflicts:
-                    raise RegistryError(
-                        "owned and external schemas use the same identifiers: "
-                        f"{', '.join(owner_conflicts)}"
-                    )
-                closure = self._close_consumer(
-                    root, record, owned, materialized, acquired, resources_stage, validation_root
-                )
-                reached = [
-                    (source, path)
-                    for path, source in closure.owners.items()
-                    if source is not closure.consumer
-                ]
-                if not reached:
-                    break
-                requested.extend(reached)
-            self._reject_unused(acquired, materialized)
-            consumer_files = sorted(
-                path for path, source in closure.owners.items() if source is closure.consumer
-            )
-            resources = resource_map(validation_root, [*closure.listed_files, *consumer_files])
-            (resources_stage / _RECEIPT).write_bytes(receipt_bytes(materialized, resources_stage))
-            local = Registry(
-                schemas={**owned, **external}, exports=record.exports, resources=resources
-            )
-            composite = compose_registry(root, record, local, resources_stage)
-            shutil.rmtree(work_root)
-            shutil.rmtree(validation_root)
-            return CandidateState(resources=resources_stage, registry=composite)
         except Exception:
             shutil.rmtree(stage, ignore_errors=True)
+            raise
+
+    def _build_in(
+        self,
+        root: Path,
+        record: ResourceRecord,
+        owned: dict[str, PurePosixPath],
+        work_root: Path,
+        resources_stage: Path,
+        validation_root: Path,
+    ) -> CandidateState:
+        """Build the candidate state inside the staging directories."""
+        work_root.mkdir()
+        acquired = [
+            self._acquire(record, index, work_root) for index in range(len(record.dependencies))
+        ]
+        requested: list[tuple[SchemaSource, Path]] = []
+        while True:
+            materialized, external = self._materialize(acquired, record, resources_stage, requested)
+            owner_conflicts = sorted(set(owned) & set(external))
+            if owner_conflicts:
+                raise RegistryError(
+                    "owned and external schemas use the same identifiers: "
+                    f"{', '.join(owner_conflicts)}",
+                    findings=[
+                        Finding(
+                            rule=CONTRACT_DUPLICATE,
+                            message=f"owned and external schemas both provide {identifier}",
+                            subject=owned[identifier],
+                            locus=BINDING_LOCUS,
+                        )
+                        for identifier in owner_conflicts
+                    ],
+                )
+            closure = self._close_consumer(
+                root, record, owned, materialized, acquired, resources_stage, validation_root
+            )
+            reached = [
+                (source, path)
+                for path, source in closure.owners.items()
+                if source is not closure.consumer
+            ]
+            if not reached:
+                break
+            requested.extend(reached)
+        self._reject_unused(acquired, materialized)
+        consumer_files = sorted(
+            path for path, source in closure.owners.items() if source is closure.consumer
+        )
+        resources = resource_map(validation_root, [*closure.listed_files, *consumer_files])
+        (resources_stage / _RECEIPT).write_bytes(receipt_bytes(materialized, resources_stage))
+        local = Registry(schemas={**owned, **external}, exports=record.exports, resources=resources)
+        composite = compose_registry(root, record, local, resources_stage, self.record_path)
+        shutil.rmtree(work_root)
+        shutil.rmtree(validation_root)
+        return CandidateState(resources=resources_stage, registry=composite)
+
+    def _acquire(self, record: ResourceRecord, index: int, work_root: Path) -> AcquiredDependency:
+        """Acquire one dependency, reporting a failure of its declaration against the record."""
+        try:
+            return acquire_dependency(self.source_provider, record, index, work_root)
+        except SchemaClosureError as exc:
+            exc.locate(self.record_path, pointer("dependencies"), record.dependencies[index].id)
             raise
 
     @staticmethod
@@ -197,20 +321,23 @@ class SchemaClosureService:
         )
         return ConsumerClosure(consumer=consumer, owners=owners, listed_files=tuple(listed_files))
 
-    @staticmethod
     def _reject_unused(
-        acquired: list[AcquiredDependency], materialized: list[MaterializedDependency]
+        self, acquired: list[AcquiredDependency], materialized: list[MaterializedDependency]
     ) -> None:
         """Fail when a dependency that supplies only resources serves no reference."""
         for item, result in zip(acquired, materialized, strict=True):
             if not item.dependency.contracts and not result.files:
                 raise RegistryError(
                     f"dependency {item.dependency.id} selects no contract, and no reference "
-                    "of the closure reaches its resources; remove the unused dependency"
+                    "of the closure reaches its resources; remove the unused dependency",
+                    rule=DEPENDENCY_UNUSED,
+                    subject=self.record_path,
+                    locus=pointer("dependencies"),
+                    discriminator=item.dependency.id,
                 )
 
-    @staticmethod
     def _materialize(
+        self,
         acquired: list[AcquiredDependency],
         record: ResourceRecord,
         resources_stage: Path,
@@ -225,7 +352,17 @@ class SchemaClosureService:
             duplicates = sorted(set(external) & set(result.schemas))
             if duplicates:
                 raise RegistryError(
-                    f"dependencies provide duplicate schema identifiers: {', '.join(duplicates)}"
+                    f"dependencies provide duplicate schema identifiers: {', '.join(duplicates)}",
+                    findings=[
+                        Finding(
+                            rule=CONTRACT_DUPLICATE,
+                            message=f"dependencies provide {identifier} more than once",
+                            subject=self.record_path,
+                            locus=pointer("dependencies"),
+                            discriminator=identifier,
+                        )
+                        for identifier in duplicates
+                    ],
                 )
             external.update(result.schemas)
         return materialized, external
@@ -233,51 +370,81 @@ class SchemaClosureService:
     def materialize(self, project_root: Path) -> None:
         """Publish a freshly built closure and registry."""
         root = project_root.resolve()
-        record = self.load(root)
-        resources_target = resolve_inside(root, record.paths.resources, "paths.resources")
-        registry_target = resolve_inside(root, record.paths.registry, "paths.registry")
-        recover_transaction(root, {resources_target, registry_target})
-        candidate = self.build(root)
-        registry_candidate = candidate.resources.parent / "schema-registry.yml"
-        registry_candidate.write_bytes(registry_bytes(candidate.registry))
-        try:
-            publish_pair(
-                root,
-                [(candidate.resources, resources_target), (registry_candidate, registry_target)],
-            )
-        finally:
-            shutil.rmtree(candidate.resources.parent, ignore_errors=True)
+        with self._reported(root):
+            record = self.load(root)
+            resources_target = resolve_inside(root, record.paths.resources, "paths.resources")
+            registry_target = resolve_inside(root, record.paths.registry, "paths.registry")
+            recover_transaction(root, {resources_target, registry_target})
+            candidate = self.build(root)
+            registry_candidate = candidate.resources.parent / "schema-registry.yml"
+            registry_candidate.write_bytes(registry_bytes(candidate.registry))
+            try:
+                publish_pair(
+                    root,
+                    [
+                        (candidate.resources, resources_target),
+                        (registry_candidate, registry_target),
+                    ],
+                )
+            finally:
+                shutil.rmtree(candidate.resources.parent, ignore_errors=True)
 
     def check(self, project_root: Path) -> None:
-        """Fail when a fresh candidate differs from the published project state."""
+        """Fail when a fresh candidate differs from the published project state.
+
+        The resources directory and the registry are compared independently, so the failure
+        holds one finding per output that differs.
+        """
         root = project_root.resolve()
-        record = self.load(root)
-        candidate = self.build(root, staging_parent=Path(tempfile.gettempdir()).resolve())
-        resources_target = resolve_inside(root, record.paths.resources, "paths.resources")
-        registry_target = resolve_inside(root, record.paths.registry, "paths.registry")
-        problems: list[str] = []
-        try:
-            expected_resources = tree_manifest(candidate.resources)
+        with self._reported(root):
+            record = self.load(root)
+            candidate = self.build(root, staging_parent=Path(tempfile.gettempdir()).resolve())
+            resources_target = resolve_inside(root, record.paths.resources, "paths.resources")
+            registry_target = resolve_inside(root, record.paths.registry, "paths.registry")
+            problems: list[Finding] = []
             try:
-                actual_resources = tree_manifest(resources_target)
-            except DriftError as exc:
-                problems.append(str(exc))
-            else:
-                if actual_resources != expected_resources:
-                    problems.append("materialized schema resources differ from a fresh build")
-            expected_registry = registry_bytes(candidate.registry)
-            if not registry_target.is_file():
-                problems.append(f"generated registry is absent: {registry_target}")
-            elif registry_target.read_bytes() != expected_registry:
-                problems.append("generated schema registry differs from a fresh build")
-        finally:
-            shutil.rmtree(candidate.resources.parent, ignore_errors=True)
-        if problems:
-            raise DriftError("; ".join(problems))
+                expected_resources = tree_manifest(candidate.resources)
+                try:
+                    actual_resources = tree_manifest(resources_target)
+                except DriftError as exc:
+                    problems.extend(exc.findings)
+                else:
+                    if actual_resources != expected_resources:
+                        problems.append(
+                            Finding(
+                                rule=DRIFT_RESOURCES,
+                                message="materialized schema resources differ from a fresh build",
+                                subject=record.paths.resources,
+                                folder=True,
+                            )
+                        )
+                expected_registry = registry_bytes(candidate.registry)
+                if not registry_target.is_file():
+                    problems.append(
+                        Finding(
+                            rule=DRIFT_REGISTRY,
+                            message=f"generated registry is absent: {registry_target}",
+                            subject=record.paths.registry,
+                        )
+                    )
+                elif registry_target.read_bytes() != expected_registry:
+                    problems.append(
+                        Finding(
+                            rule=DRIFT_REGISTRY,
+                            message="generated schema registry differs from a fresh build",
+                            subject=record.paths.registry,
+                        )
+                    )
+            finally:
+                shutil.rmtree(candidate.resources.parent, ignore_errors=True)
+            if problems:
+                raise DriftError(
+                    "; ".join(problem.message for problem in problems), findings=problems
+                )
 
     def validate(self, project_root: Path) -> None:
         """Validate the record and build all outputs without publishing them."""
-        candidate = self.build(
-            project_root.resolve(), staging_parent=Path(tempfile.gettempdir()).resolve()
-        )
-        shutil.rmtree(candidate.resources.parent, ignore_errors=True)
+        root = project_root.resolve()
+        with self._reported(root):
+            candidate = self.build(root, staging_parent=Path(tempfile.gettempdir()).resolve())
+            shutil.rmtree(candidate.resources.parent, ignore_errors=True)

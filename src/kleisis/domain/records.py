@@ -20,6 +20,7 @@ from kleisis.domain.models import (
     safe_relative_path,
 )
 from kleisis.errors import RecordError
+from kleisis.findings import RECORD_UNREADABLE, field_pointer, pointer
 
 _FULL_COMMIT = re.compile(r"[0-9a-f]{40}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -29,7 +30,7 @@ _ENVIRONMENT_NAME = re.compile(r"[A-Z_][A-Z0-9_]*")
 
 def _mapping(value: object, field_name: str) -> dict[str, Any]:
     if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
-        raise RecordError(f"{field_name} must be a mapping")
+        raise RecordError(f"{field_name} must be a mapping", locus=field_pointer(field_name))
     return cast(dict[str, Any], value)
 
 
@@ -37,26 +38,33 @@ def _sequence(value: object, field_name: str) -> list[Any]:
     if value is None:
         return []
     if not isinstance(value, list):
-        raise RecordError(f"{field_name} must be a sequence")
+        raise RecordError(f"{field_name} must be a sequence", locus=field_pointer(field_name))
     return value
 
 
 def _keys(value: dict[str, Any], allowed: set[str], field_name: str) -> None:
     unknown = sorted(set(value) - allowed)
     if unknown:
-        raise RecordError(f"{field_name} contains unknown fields: {', '.join(unknown)}")
+        raise RecordError(
+            f"{field_name} contains unknown fields: {', '.join(unknown)}",
+            locus=field_pointer(field_name),
+        )
 
 
 def _nonempty_string(value: object, field_name: str) -> str:
     if not isinstance(value, str) or not value.strip():
-        raise RecordError(f"{field_name} must be a non-empty string")
+        raise RecordError(
+            f"{field_name} must be a non-empty string", locus=field_pointer(field_name)
+        )
     return value
 
 
 def _commit(value: object, field_name: str) -> str:
     result = _nonempty_string(value, field_name)
     if not _FULL_COMMIT.fullmatch(result):
-        raise RecordError(f"{field_name} must be a full lowercase Git commit")
+        raise RecordError(
+            f"{field_name} must be a full lowercase Git commit", locus=field_pointer(field_name)
+        )
     return result
 
 
@@ -64,7 +72,10 @@ def _portable_https_url(value: object, field_name: str) -> str:
     result = _nonempty_string(value, field_name)
     parsed = urlparse(result)
     if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
-        raise RecordError(f"{field_name} must be an HTTPS URL without embedded credentials")
+        raise RecordError(
+            f"{field_name} must be an HTTPS URL without embedded credentials",
+            locus=field_pointer(field_name),
+        )
     return result
 
 
@@ -73,11 +84,21 @@ def load_resource_record(path: Path) -> ResourceRecord:
     try:
         raw = load_document(path)
     except (OSError, TypeError, ValueError, yaml.YAMLError) as exc:
-        raise RecordError(f"cannot read resource record {path}: {exc}") from exc
+        raise RecordError(
+            f"cannot read resource record {path}: {exc}", rule=RECORD_UNREADABLE, subject=path
+        ) from exc
+    try:
+        return _resource_record(raw)
+    except RecordError as exc:
+        exc.locate(path)
+        raise
+
+
+def _resource_record(raw: object) -> ResourceRecord:
     root = _mapping(raw, "resource record")
     _keys(root, {"format_version", "paths", "exports", "dependencies", "projects"}, "record")
     if root.get("format_version") != 1:
-        raise RecordError("format_version must equal 1")
+        raise RecordError("format_version must equal 1", locus=pointer("format_version"))
 
     raw_paths = _mapping(root.get("paths", {}), "paths")
     _keys(raw_paths, {"owned_schemas", "registry", "resources"}, "paths")
@@ -98,7 +119,7 @@ def load_resource_record(path: Path) -> ResourceRecord:
         for index, item in enumerate(_sequence(root.get("exports"), "exports"))
     )
     if len(exports) != len(set(exports)):
-        raise RecordError("exports contains duplicate identifiers")
+        raise RecordError("exports contains duplicate identifiers", locus=pointer("exports"))
 
     dependencies: list[Dependency] = []
     dependency_ids: set[str] = set()
@@ -107,9 +128,15 @@ def load_resource_record(path: Path) -> ResourceRecord:
         _keys(raw_dependency, {"id", "source", "registry", "contracts"}, f"dependencies[{index}]")
         dependency_id = _nonempty_string(raw_dependency.get("id"), f"dependencies[{index}].id")
         if not _DEPENDENCY_ID.fullmatch(dependency_id):
-            raise RecordError(f"dependencies[{index}].id must be lower kebab-case")
+            raise RecordError(
+                f"dependencies[{index}].id must be lower kebab-case",
+                locus=pointer("dependencies", index, "id"),
+            )
         if dependency_id in dependency_ids:
-            raise RecordError(f"duplicate dependency id: {dependency_id}")
+            raise RecordError(
+                f"duplicate dependency id: {dependency_id}",
+                locus=pointer("dependencies", index, "id"),
+            )
         dependency_ids.add(dependency_id)
 
         raw_source = _mapping(raw_dependency.get("source"), f"dependencies[{index}].source")
@@ -127,7 +154,9 @@ def load_resource_record(path: Path) -> ResourceRecord:
                 or not _ENVIRONMENT_NAME.fullmatch(credential_env)
             ):
                 raise RecordError(
-                    f"dependencies[{index}].source.credential_env must name an environment variable"
+                    f"dependencies[{index}].source.credential_env "
+                    "must name an environment variable",
+                    locus=pointer("dependencies", index, "source", "credential_env"),
                 )
             raw_archive_roots = raw_source.get("archive_roots")
             archive_roots = tuple(
@@ -144,13 +173,18 @@ def load_resource_record(path: Path) -> ResourceRecord:
             )
             if raw_archive_roots is not None and not archive_roots:
                 raise RecordError(
-                    f"dependencies[{index}].source.archive_roots must be non-empty when present"
+                    f"dependencies[{index}].source.archive_roots must be non-empty when present",
+                    locus=pointer("dependencies", index, "source", "archive_roots"),
                 )
             if len(archive_roots) != len(set(archive_roots)):
-                raise RecordError(f"dependencies[{index}].source.archive_roots must be unique")
+                raise RecordError(
+                    f"dependencies[{index}].source.archive_roots must be unique",
+                    locus=pointer("dependencies", index, "source", "archive_roots"),
+                )
             if archive_roots != tuple(sorted(archive_roots)):
                 raise RecordError(
-                    f"dependencies[{index}].source.archive_roots must follow path order"
+                    f"dependencies[{index}].source.archive_roots must follow path order",
+                    locus=pointer("dependencies", index, "source", "archive_roots"),
                 )
             source = GitSource(
                 kind="git",
@@ -171,7 +205,10 @@ def load_resource_record(path: Path) -> ResourceRecord:
                 raw_source.get("sha256"), f"dependencies[{index}].source.sha256"
             )
             if not _SHA256.fullmatch(digest):
-                raise RecordError(f"dependencies[{index}].source.sha256 must be lowercase SHA-256")
+                raise RecordError(
+                    f"dependencies[{index}].source.sha256 must be lowercase SHA-256",
+                    locus=pointer("dependencies", index, "source", "sha256"),
+                )
             source = ArtifactSource(
                 kind="artifact",
                 locator=_portable_https_url(
@@ -184,7 +221,10 @@ def load_resource_record(path: Path) -> ResourceRecord:
                 sha256=digest,
             )
         else:
-            raise RecordError(f"dependencies[{index}].source.kind must be git or artifact")
+            raise RecordError(
+                f"dependencies[{index}].source.kind must be git or artifact",
+                locus=pointer("dependencies", index, "source", "kind"),
+            )
 
         contracts = tuple(
             _nonempty_string(contract, f"dependencies[{index}].contracts[{contract_index}]")
@@ -193,7 +233,10 @@ def load_resource_record(path: Path) -> ResourceRecord:
             )
         )
         if len(contracts) != len(set(contracts)):
-            raise RecordError(f"dependencies[{index}].contracts must be unique")
+            raise RecordError(
+                f"dependencies[{index}].contracts must be unique",
+                locus=pointer("dependencies", index, "contracts"),
+            )
         dependencies.append(
             Dependency(
                 id=dependency_id,
@@ -212,11 +255,16 @@ def load_resource_record(path: Path) -> ResourceRecord:
         _keys(raw_project, {"path", "required"}, f"projects[{index}]")
         project_path = safe_relative_path(raw_project.get("path"), f"projects[{index}].path")
         if project_path in project_paths:
-            raise RecordError(f"duplicate project path: {project_path}")
+            raise RecordError(
+                f"duplicate project path: {project_path}", locus=pointer("projects", index, "path")
+            )
         project_paths.add(project_path)
         required = raw_project.get("required", True)
         if not isinstance(required, bool):
-            raise RecordError(f"projects[{index}].required must be a boolean")
+            raise RecordError(
+                f"projects[{index}].required must be a boolean",
+                locus=pointer("projects", index, "required"),
+            )
         projects.append(Project(path=project_path, required=required))
 
     return ResourceRecord(
