@@ -1,6 +1,6 @@
 # Findings output
 
-**Status**: Proposed. It implements the Kleisis row of the producer migration of Elenchos, and is accepted with the findings profile of Elenchos.
+**Status**: Accepted. It implements the Kleisis row of the producer migration of Elenchos.
 
 ## Problem
 

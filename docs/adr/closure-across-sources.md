@@ -1,6 +1,6 @@
 # Closure across sources
 
-**Status**: Proposed. It implements step 0 of the draft decision of Geonexus on tool roles, and is accepted with it.
+**Status**: Accepted. It implements step 0 of the decision of Geonexus on tool roles.
 
 ## Problem
 
