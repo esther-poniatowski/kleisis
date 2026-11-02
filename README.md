@@ -101,6 +101,16 @@ Keep the resource directory disjoint from these source and control paths:
 - the resource record;
 - each declared child checkout.
 
+The optional key `schemas` overrides the two names by which Kleisis recognizes the owned schemas. The key `suffixes` lists the name endings of the schema files, and the key `binding` names the root property that carries the identifier of a contract. Each key keeps its default value when the record omits it:
+
+```yaml
+schemas:
+  suffixes: [.schema.yaml, .schema.yml, .schema.json]
+  binding: _schema
+```
+
+A suffix opens with a dot and holds no path separator. A binding is a property name of letters, digits, `_` and `-`. The convention of a dependency may differ from that of the consumer, so a dependency entry may name the binding of its own contracts under the key `binding`, which defaults to `_schema`.
+
 ## Commands
 
 The three commands keep writes separate from checks:
@@ -148,7 +158,7 @@ The generated registry declares `schema_version: 2` and holds three keys:
 
 The key `resources` covers every owned or materialized schema file whose root declares an absolute `$id`, which starts with a URI scheme. Two files may declare one `$id` only with identical bytes. Kleisis still reads a registry of version 1, which has no `resources` key, in a dependency or a child repository. The [closure across sources](docs/adr/closure-across-sources.md) records this format.
 
-An owned contract uses the root path `properties._schema.const` to state its identifier. Its root `required` list must also name `_schema`. The resource record must export every contract with both entries. A file with neither entry remains an owned support schema. The support schema can still serve a `$ref`. A file with only one entry or an invalid value fails the command.
+An owned contract uses the root path `properties.<binding>.const` to state its identifier, where `<binding>` is the binding of the resource record, `_schema` by default. Its root `required` list must also name the binding. The resource record must export every contract with both entries. A file with neither entry remains an owned support schema. The support schema can still serve a `$ref`. A file with only one entry or an invalid value fails the command.
 
 ## Child projects
 

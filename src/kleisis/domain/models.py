@@ -53,6 +53,29 @@ def resolve_inside(
     return resolved
 
 
+DEFAULT_SCHEMA_SUFFIXES = (".schema.yaml", ".schema.yml", ".schema.json")
+"""The name endings that mark a schema file unless a resource record declares others."""
+DEFAULT_BINDING = "_schema"
+"""The root property that binds a record to its contract unless a record declares another."""
+
+
+@dataclass(frozen=True)
+class SchemaConvention:
+    """The names by which a source marks its schema files and its contracts.
+
+    A file is a schema candidate when its name ends with one of ``suffixes``. A candidate is a
+    contract when its root declares the property ``binding``, fixed by ``const`` to the contract
+    identifier, and requires it.
+    """
+
+    suffixes: tuple[str, ...] = DEFAULT_SCHEMA_SUFFIXES
+    binding: str = DEFAULT_BINDING
+
+
+DEFAULT_CONVENTION = SchemaConvention()
+"""The schema convention of a resource record that declares none."""
+
+
 @dataclass(frozen=True)
 class Paths:
     """Repository paths controlled by the resource record."""
@@ -97,6 +120,7 @@ class Dependency:
     source: Source
     registry: PurePosixPath
     contracts: tuple[str, ...]
+    binding: str = DEFAULT_BINDING
 
 
 @dataclass(frozen=True)
@@ -113,6 +137,7 @@ class ResourceRecord:
 
     format_version: int
     paths: Paths
+    schemas: SchemaConvention = DEFAULT_CONVENTION
     exports: tuple[str, ...] = ()
     dependencies: tuple[Dependency, ...] = ()
     projects: tuple[Project, ...] = ()

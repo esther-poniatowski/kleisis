@@ -11,12 +11,15 @@ import yaml
 
 from kleisis.domain.documents import load_document
 from kleisis.domain.models import (
+    DEFAULT_BINDING,
+    DEFAULT_SCHEMA_SUFFIXES,
     ArtifactSource,
     Dependency,
     GitSource,
     Paths,
     Project,
     ResourceRecord,
+    SchemaConvention,
     safe_relative_path,
 )
 from kleisis.errors import RecordError
@@ -26,6 +29,8 @@ _FULL_COMMIT = re.compile(r"[0-9a-f]{40}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _DEPENDENCY_ID = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 _ENVIRONMENT_NAME = re.compile(r"[A-Z_][A-Z0-9_]*")
+_PROPERTY_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
+_SUFFIX = re.compile(r"\.[A-Za-z0-9_.-]+")
 
 
 def _mapping(value: object, field_name: str) -> dict[str, Any]:
@@ -96,7 +101,11 @@ def load_resource_record(path: Path) -> ResourceRecord:
 
 def _resource_record(raw: object) -> ResourceRecord:
     root = _mapping(raw, "resource record")
-    _keys(root, {"format_version", "paths", "exports", "dependencies", "projects"}, "record")
+    _keys(
+        root,
+        {"format_version", "paths", "schemas", "exports", "dependencies", "projects"},
+        "record",
+    )
     if root.get("format_version") != 1:
         raise RecordError("format_version must equal 1", locus=pointer("format_version"))
 
@@ -114,6 +123,8 @@ def _resource_record(raw: object) -> ResourceRecord:
         ),
     )
 
+    schemas = _schema_convention(root.get("schemas", {}))
+
     exports = tuple(
         _nonempty_string(item, f"exports[{index}]")
         for index, item in enumerate(_sequence(root.get("exports"), "exports"))
@@ -125,7 +136,11 @@ def _resource_record(raw: object) -> ResourceRecord:
     dependency_ids: set[str] = set()
     for index, item in enumerate(_sequence(root.get("dependencies"), "dependencies")):
         raw_dependency = _mapping(item, f"dependencies[{index}]")
-        _keys(raw_dependency, {"id", "source", "registry", "contracts"}, f"dependencies[{index}]")
+        _keys(
+            raw_dependency,
+            {"id", "source", "registry", "contracts", "binding"},
+            f"dependencies[{index}]",
+        )
         dependency_id = _nonempty_string(raw_dependency.get("id"), f"dependencies[{index}].id")
         if not _DEPENDENCY_ID.fullmatch(dependency_id):
             raise RecordError(
@@ -245,6 +260,10 @@ def _resource_record(raw: object) -> ResourceRecord:
                     raw_dependency.get("registry"), f"dependencies[{index}].registry"
                 ),
                 contracts=contracts,
+                binding=_binding(
+                    raw_dependency.get("binding", DEFAULT_BINDING),
+                    f"dependencies[{index}].binding",
+                ),
             )
         )
 
@@ -270,7 +289,50 @@ def _resource_record(raw: object) -> ResourceRecord:
     return ResourceRecord(
         format_version=1,
         paths=paths,
+        schemas=schemas,
         exports=exports,
         dependencies=tuple(dependencies),
         projects=tuple(projects),
+    )
+
+
+def _binding(value: object, field_name: str) -> str:
+    """Return the name of a binding property, a JSON property name without a pointer escape."""
+    name = _nonempty_string(value, field_name)
+    if not _PROPERTY_NAME.fullmatch(name):
+        raise RecordError(
+            f"{field_name} must be a property name of letters, digits, '_' and '-'",
+            locus=field_pointer(field_name),
+        )
+    return name
+
+
+def _schema_convention(raw: object) -> SchemaConvention:
+    """Return the schema convention of the record, each key defaulting to the conventional value."""
+    convention = _mapping(raw, "schemas")
+    _keys(convention, {"suffixes", "binding"}, "schemas")
+    raw_suffixes = convention.get("suffixes")
+    suffixes = (
+        DEFAULT_SCHEMA_SUFFIXES
+        if raw_suffixes is None
+        else tuple(
+            _nonempty_string(item, f"schemas.suffixes[{index}]")
+            for index, item in enumerate(_sequence(raw_suffixes, "schemas.suffixes"))
+        )
+    )
+    if not suffixes:
+        raise RecordError(
+            "schemas.suffixes must not be empty", locus=pointer("schemas", "suffixes")
+        )
+    if len(suffixes) != len(set(suffixes)):
+        raise RecordError("schemas.suffixes must be unique", locus=pointer("schemas", "suffixes"))
+    for index, suffix in enumerate(suffixes):
+        if not _SUFFIX.fullmatch(suffix):
+            raise RecordError(
+                f"schemas.suffixes[{index}] must open with a dot and hold no separator",
+                locus=pointer("schemas", "suffixes", index),
+            )
+    return SchemaConvention(
+        suffixes=suffixes,
+        binding=_binding(convention.get("binding", DEFAULT_BINDING), "schemas.binding"),
     )

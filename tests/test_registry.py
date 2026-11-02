@@ -4,7 +4,7 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 
-from kleisis.domain.models import Registry
+from kleisis.domain.models import Registry, SchemaConvention
 from kleisis.domain.registry import (
     discover_owned_schemas,
     load_registry,
@@ -31,6 +31,37 @@ properties:
     assert discover_owned_schemas(tmp_path, schema_root) == {
         "example:record@1": PurePosixPath("specs/schemas/record.schema.yaml")
     }
+
+
+def test_discovery_follows_the_configured_suffixes_and_binding(tmp_path: Path) -> None:
+    schema_root = tmp_path / "schemas"
+    schema_root.mkdir()
+    (schema_root / "record.contract.yml").write_text(
+        "required: [kind]\nproperties:\n  kind: {const: example:record@1}\n", encoding="utf-8"
+    )
+    (schema_root / "record.base.yml").write_text(
+        "properties:\n  _schema: {type: string}\n", encoding="utf-8"
+    )
+    (schema_root / "other.schema.yaml").write_text(
+        "required: [_schema]\nproperties:\n  _schema: {const: example:other@1}\n",
+        encoding="utf-8",
+    )
+    convention = SchemaConvention(suffixes=(".contract.yml", ".base.yml"), binding="kind")
+
+    assert discover_owned_schemas(tmp_path, schema_root, convention) == {
+        "example:record@1": PurePosixPath("schemas/record.contract.yml")
+    }
+
+
+def test_a_configured_binding_reports_its_own_name(tmp_path: Path) -> None:
+    schema_root = tmp_path / "schemas"
+    schema_root.mkdir()
+    (schema_root / "record.schema.yml").write_text(
+        "properties:\n  kind: {const: example:record@1}\n", encoding="utf-8"
+    )
+
+    with pytest.raises(RegistryError, match="does not require kind"):
+        discover_owned_schemas(tmp_path, schema_root, SchemaConvention(binding="kind"))
 
 
 def test_discovery_rejects_a_malformed_binding(tmp_path: Path) -> None:

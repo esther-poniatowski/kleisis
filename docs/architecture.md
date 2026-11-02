@@ -37,7 +37,7 @@ A materialization run constructs a complete candidate before it changes the cons
 
 1. The consumer revision fixes owned schemas and child checkout states, while the resource record fixes external states and declares all paths.
 2. Each source provider acquires its declared state in an isolated staging directory.
-3. Each selected registry entry must match the schema-binding path `_schema.const` of its target.
+3. Each selected registry entry must match the schema-binding path `<binding>.const` of its target, where the dependency entry names the binding, `_schema` by default.
 4. The resolver closes the selected contracts across the acquired sources, and the materializer copies each reached file under the directory of its dependency.
 5. The resolver closes the owned schemas in a copy of the candidate repository. A file reached in a dependency source is not yet materialized, so the materializer adds it and the resolver closes again.
 6. The local registry combines owned contracts with selected external contracts, and maps each absolute `$id` of the candidate to its file.
@@ -65,7 +65,7 @@ The containing file supplies the base directory. The schema keyword `$id` does n
 Every generated registry must satisfy these invariants:
 
 - every identifier is unique;
-- every owned contract carries a complete root `_schema` binding and enters the export set;
+- every owned contract carries a complete root binding, named by the resource record and `_schema` by default, and enters the export set;
 - every owned file without a binding trace remains outside the registry as a support schema;
 - every generated target stays inside the consumer repository;
 - every imported child export stays inside its declared child repository;

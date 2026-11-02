@@ -21,12 +21,56 @@ def test_defaults_are_conventional_repository_paths(tmp_path: Path) -> None:
     assert record.paths.owned_schemas.as_posix() == "specs/schemas"
     assert record.paths.registry.as_posix() == "specs/schema-registry.yml"
     assert record.paths.resources.as_posix() == ".schema-resources"
+    assert record.schemas.suffixes == (".schema.yaml", ".schema.yml", ".schema.json")
+    assert record.schemas.binding == "_schema"
+
+
+def test_the_schema_convention_is_read_from_the_record(tmp_path: Path) -> None:
+    record = load_resource_record(
+        write_record(
+            tmp_path,
+            """format_version: 1
+schemas:
+  suffixes: [.contract.yml]
+  binding: $contract
+dependencies:
+  - id: shared
+    registry: specs/schema-registry.yml
+    contracts: [shared:item@1]
+    binding: _schema
+    source:
+      kind: git
+      repository: https://example.invalid/shared.git
+      commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+""".replace("$contract", "contract"),
+        )
+    )
+
+    assert record.schemas.suffixes == (".contract.yml",)
+    assert record.schemas.binding == "contract"
+    assert record.dependencies[0].binding == "_schema"
+
+
+def test_a_partial_schema_convention_keeps_the_other_default(tmp_path: Path) -> None:
+    record = load_resource_record(
+        write_record(tmp_path, "format_version: 1\nschemas:\n  binding: kind\n")
+    )
+
+    assert record.schemas.suffixes == (".schema.yaml", ".schema.yml", ".schema.json")
+    assert record.schemas.binding == "kind"
 
 
 @pytest.mark.parametrize(
     "body, message",
     [
         ("format_version: 1\nextra: true\n", "unknown fields"),
+        ("format_version: 1\nschemas:\n  pattern: x\n", "unknown fields"),
+        ("format_version: 1\nschemas:\n  suffixes: []\n", "must not be empty"),
+        ("format_version: 1\nschemas:\n  suffixes: [.yml, .yml]\n", "must be unique"),
+        ("format_version: 1\nschemas:\n  suffixes: [schema.yml]\n", "open with a dot"),
+        ("format_version: 1\nschemas:\n  suffixes: [.a/b.yml]\n", "open with a dot"),
+        ("format_version: 1\nschemas:\n  binding: a/b\n", "property name"),
+        ("format_version: 1\nschemas:\n  binding: ''\n", "non-empty string"),
         (
             """format_version: 1
 dependencies:

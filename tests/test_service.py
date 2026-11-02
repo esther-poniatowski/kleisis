@@ -247,6 +247,28 @@ def test_every_owned_contract_must_be_exported(tmp_path: Path) -> None:
         SchemaClosureService().validate(root)
 
 
+def test_the_record_convention_selects_the_owned_contracts(tmp_path: Path) -> None:
+    root = tmp_path / "consumer"
+    schemas = root / "specs/schemas"
+    schemas.mkdir(parents=True)
+    (schemas / "record.contract.yml").write_text(
+        "required: [kind]\nproperties:\n  kind: {const: consumer:record@1}\n", encoding="utf-8"
+    )
+    (root / "specs/schema-resources.yml").write_text(
+        "format_version: 1\n"
+        "schemas: {suffixes: [.contract.yml], binding: kind}\n"
+        "exports: [consumer:record@1]\n",
+        encoding="utf-8",
+    )
+
+    SchemaClosureService().materialize(root)
+
+    registry = load_registry(root / "specs/schema-registry.yml")
+    assert registry.schemas == {
+        "consumer:record@1": PurePosixPath("specs/schemas/record.contract.yml")
+    }
+
+
 class FailingProvider:
     """Fail after staging begins."""
 

@@ -10,7 +10,14 @@ from typing import Any, cast
 import yaml
 
 from kleisis.domain.documents import load_document
-from kleisis.domain.models import Registry, safe_relative_path
+from kleisis.domain.models import (
+    DEFAULT_BINDING,
+    DEFAULT_CONVENTION,
+    DEFAULT_SCHEMA_SUFFIXES,
+    Registry,
+    SchemaConvention,
+    safe_relative_path,
+)
 from kleisis.domain.references import is_absolute_uri, root_identifier
 from kleisis.errors import RegistryError, SchemaClosureError
 from kleisis.findings import (
@@ -24,9 +31,14 @@ from kleisis.findings import (
     pointer,
 )
 
-_SCHEMA_SUFFIXES = (".schema.yaml", ".schema.yml", ".schema.json")
-BINDING_LOCUS = pointer("properties", "_schema", "const")
-"""The locus of the contract identifier that a schema declares."""
+
+def binding_locus(binding: str = DEFAULT_BINDING) -> str:
+    """Return the locus of the contract identifier that a schema declares under ``binding``."""
+    return pointer("properties", binding, "const")
+
+
+BINDING_LOCUS = binding_locus()
+"""The locus of the contract identifier that a schema declares under the default binding."""
 IDENTIFIER_LOCUS = pointer("$id")
 """The locus of the absolute identifier that a schema declares at its root."""
 REGISTRY_VERSION = 2
@@ -46,41 +58,44 @@ def _load_mapping(path: Path, rule: Rule) -> dict[str, Any]:
     return cast(dict[str, Any], value)
 
 
-def schema_identifier(path: Path) -> str | None:
-    """Read the logical contract of a concrete schema, or identify a support schema."""
+def schema_identifier(path: Path, binding: str = DEFAULT_BINDING) -> str | None:
+    """Read the logical contract of a concrete schema, or identify a support schema.
+
+    ``binding`` names the root property that carries the contract identifier.
+    """
     schema = _load_mapping(path, SCHEMA_UNREADABLE)
     properties = schema.get("properties")
     required = schema.get("required")
-    has_property = isinstance(properties, dict) and "_schema" in properties
-    requires_property = isinstance(required, list) and "_schema" in required
+    has_property = isinstance(properties, dict) and binding in properties
+    requires_property = isinstance(required, list) and binding in required
     if not has_property and not requires_property:
         return None
-    if not isinstance(properties, dict) or "_schema" not in properties:
+    if not isinstance(properties, dict) or binding not in properties:
         raise RegistryError(
-            f"{path} requires _schema but has no _schema property mapping",
+            f"{path} requires {binding} but has no {binding} property mapping",
             rule=CONTRACT_BINDING,
             subject=path,
-            locus=pointer("properties", "_schema"),
+            locus=pointer("properties", binding),
         )
-    binding = properties["_schema"]
-    if not isinstance(binding, dict):
+    declared = properties[binding]
+    if not isinstance(declared, dict):
         raise RegistryError(
-            f"{path} has an invalid _schema property mapping",
+            f"{path} has an invalid {binding} property mapping",
             rule=CONTRACT_BINDING,
             subject=path,
-            locus=pointer("properties", "_schema"),
+            locus=pointer("properties", binding),
         )
-    identifier = binding.get("const")
+    identifier = declared.get("const")
     if not isinstance(identifier, str) or not identifier.strip():
         raise RegistryError(
-            f"{path} has no non-empty properties._schema.const",
+            f"{path} has no non-empty properties.{binding}.const",
             rule=CONTRACT_BINDING,
             subject=path,
-            locus=BINDING_LOCUS,
+            locus=binding_locus(binding),
         )
     if not requires_property:
         raise RegistryError(
-            f"{path} does not require _schema at the root",
+            f"{path} does not require {binding} at the root",
             rule=CONTRACT_BINDING,
             subject=path,
             locus=pointer("required"),
@@ -88,9 +103,12 @@ def schema_identifier(path: Path) -> str | None:
     return identifier
 
 
-def discover_owned_schemas(project_root: Path, schema_root: Path) -> dict[str, PurePosixPath]:
+def discover_owned_schemas(
+    project_root: Path, schema_root: Path, convention: SchemaConvention = DEFAULT_CONVENTION
+) -> dict[str, PurePosixPath]:
     """Discover every concrete schema below the configured owned-schema root.
 
+    ``convention`` fixes the name endings of the schema files and the binding of a contract.
     The absence of that root is reported without subject; the caller names its declaration.
     """
     if not schema_root.is_dir():
@@ -100,8 +118,8 @@ def discover_owned_schemas(project_root: Path, schema_root: Path) -> dict[str, P
             locus=pointer("paths", "owned_schemas"),
         )
     result: dict[str, PurePosixPath] = {}
-    for path in sorted(candidate_schemas(schema_root)):
-        identifier = schema_identifier(path)
+    for path in sorted(candidate_schemas(schema_root, convention.suffixes)):
+        identifier = schema_identifier(path, convention.binding)
         if identifier is None:
             continue
         relative = PurePosixPath(path.relative_to(project_root).as_posix())
@@ -111,18 +129,20 @@ def discover_owned_schemas(project_root: Path, schema_root: Path) -> dict[str, P
                 f"duplicate schema identifier {identifier!r}: {previous} and {relative}",
                 rule=CONTRACT_DUPLICATE,
                 subject=path,
-                locus=BINDING_LOCUS,
+                locus=binding_locus(convention.binding),
             )
         result[identifier] = relative
     return result
 
 
-def candidate_schemas(root: Path) -> list[Path]:
-    """Return files whose names declare JSON Schema candidates."""
+def candidate_schemas(
+    root: Path, suffixes: tuple[str, ...] = DEFAULT_SCHEMA_SUFFIXES
+) -> list[Path]:
+    """Return files whose names end with one of ``suffixes``, which mark JSON Schema candidates."""
     return [
         path
         for path in root.rglob("*")
-        if path.is_file() and any(path.name.endswith(suffix) for suffix in _SCHEMA_SUFFIXES)
+        if path.is_file() and any(path.name.endswith(suffix) for suffix in suffixes)
     ]
 
 

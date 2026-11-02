@@ -26,7 +26,7 @@ from kleisis.domain.models import (
 from kleisis.domain.records import load_resource_record
 from kleisis.domain.references import SchemaSource, source_closure
 from kleisis.domain.registry import (
-    BINDING_LOCUS,
+    binding_locus,
     candidate_schemas,
     discover_owned_schemas,
     registry_bytes,
@@ -160,7 +160,7 @@ class SchemaClosureService:
             locus=pointer("paths", "owned_schemas"),
         )
         try:
-            owned = discover_owned_schemas(root, owned_root)
+            owned = discover_owned_schemas(root, owned_root, record.schemas)
         except SchemaClosureError as exc:
             exc.locate(self.record_path)
             raise
@@ -188,7 +188,7 @@ class SchemaClosureService:
                         rule=CONTRACT_UNEXPORTED,
                         message=f"owned contract {identifier} is absent from exports",
                         subject=owned[identifier],
-                        locus=BINDING_LOCUS,
+                        locus=binding_locus(record.schemas.binding),
                     )
                     for identifier in unexported_contracts
                 ],
@@ -243,7 +243,7 @@ class SchemaClosureService:
                             rule=CONTRACT_DUPLICATE,
                             message=f"owned and external schemas both provide {identifier}",
                             subject=owned[identifier],
-                            locus=BINDING_LOCUS,
+                            locus=binding_locus(record.schemas.binding),
                         )
                         for identifier in owner_conflicts
                     ],
@@ -300,7 +300,8 @@ class SchemaClosureService:
         copy_tree(owned_root, validation_root / Path(record.paths.owned_schemas))
         copy_tree(resources_stage, validation_root / Path(record.paths.resources))
         owned_files = sorted(
-            validation_root / path.relative_to(root) for path in candidate_schemas(owned_root)
+            validation_root / path.relative_to(root)
+            for path in candidate_schemas(owned_root, record.schemas.suffixes)
         )
         materialized_files = sorted(
             validation_root / Path(record.paths.resources) / Path(path)

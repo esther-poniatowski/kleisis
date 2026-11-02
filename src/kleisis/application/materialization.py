@@ -17,7 +17,7 @@ from kleisis.domain.models import (
     resolve_inside,
 )
 from kleisis.domain.references import SchemaSource, source_closure
-from kleisis.domain.registry import BINDING_LOCUS, load_registry, schema_identifier
+from kleisis.domain.registry import binding_locus, load_registry, schema_identifier
 from kleisis.errors import RegistryError
 from kleisis.findings import (
     CONTRACT_BINDING_MISMATCH,
@@ -138,14 +138,14 @@ def acquire_dependency(
         for identifier in dependency.contracts
     )
     for identifier, entrypoint in zip(dependency.contracts, entrypoints, strict=True):
-        declared = schema_identifier(entrypoint)
+        declared = schema_identifier(entrypoint, dependency.binding)
         if declared != identifier:
             raise RegistryError(
                 f"dependency {dependency.id} registry maps {identifier!r} to a schema "
                 f"declaring {declared!r}",
                 rule=CONTRACT_BINDING_MISMATCH,
                 subject=entrypoint,
-                locus=BINDING_LOCUS,
+                locus=binding_locus(dependency.binding),
             )
     resources = {
         uri: resolve_inside(
