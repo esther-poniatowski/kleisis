@@ -119,13 +119,17 @@ The three commands keep writes separate from checks:
 - The materialization command `kleisis materialize --root .` replaces both generated outputs. If either write fails, the command attempts to restore both outputs immediately. If the command cannot restore them, it retains the transaction record so a later run can recover them.
 - The check command `kleisis check --root .` rematerializes in an isolated directory and fails when either generated output differs.
 
-Each command accepts the record-path option `--record` when the resource record does not use its default path.
+Each command works on one root, the consumer repository. The root is named by the option `-r`, `--root`, or else by the environment variable `KLEISIS_ROOT`, or else is the current folder. Kleisis reads no settings file of its own, so it never searches the ancestors of the current folder. A root that is not a folder is a usage error.
+
+Each command accepts the option `--record PATH` when the resource record does not lie at its default path `specs/schema-resources.yml` below the root. The path is read from the current folder, and must lie below the root.
+
+The exit status is 0 on success, 1 when the build, the validation or the check fails, and 2 on a usage error or when the SARIF log cannot be written. The option `-v`, `--version` prints the version.
 
 The commands `validate` and `check` also accept the option `--format sarif`. The command then writes a SARIF 2.1.0 log on standard output, in the findings profile of the gate Elenchos. The build stops at its first failure, so the log holds one result for that failure, or one per item when the failure lists several; `check` adds one result per generated output that differs. A successful run yields a log without result. The line on standard error and the exit status stay unchanged.
 
 The log also states whether the run is complete. A run stopped at its first failure, or by an operating-system error, declares a failed invocation whose notification states why it stopped. An operating-system error yields no result.
 
-The option `--output PATH` writes the log to a file instead of standard output, for a caller that runs the command without a shell, such as the gate. The command creates the missing parent directories, and exits with status 2 when it cannot write the log. The [findings output](docs/adr/findings-output.md) lists the rules and records the choices:
+The option `-o`, `--output PATH` writes the log to a file instead of standard output, for a caller that runs the command without a shell, such as the gate. The command creates the missing parent directories, and exits with status 2 when it cannot write the log. The [findings output](docs/adr/findings-output.md) lists the rules and records the choices:
 
 ```console
 kleisis check --root . --format sarif --output build/elenchos/kleisis.sarif

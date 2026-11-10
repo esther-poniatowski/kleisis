@@ -639,6 +639,78 @@ def test_unwritable_output_exits_with_status_2(
     assert "kleisis: cannot write the SARIF log: " in capsys.readouterr().err
 
 
+def test_version_option_prints_the_version(capsys: pytest.CaptureFixture[str]) -> None:
+    for option in ("-v", "--version"):
+        assert run_main([option]) == 0
+        assert capsys.readouterr().out.strip() == __version__
+
+
+def test_short_forms_name_the_root_and_the_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = owned_reference("missing.schema.yaml")(tmp_path, monkeypatch)
+    output = tmp_path / "logs/kleisis.sarif"
+
+    status = run_main(["validate", "-r", str(root), "--format", "sarif", "-o", str(output)])
+
+    assert status == 1
+    assert capsys.readouterr().out == ""
+    log = json.loads(output.read_text(encoding="utf-8"))
+    assert invocation(log)["executionSuccessful"] is False
+
+
+def test_root_is_read_from_the_environment_then_overridden_by_the_option(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = owned_reference("missing.schema.yaml")(tmp_path, monkeypatch)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setenv("KLEISIS_ROOT", str(root))
+
+    assert run_main(["validate"]) == 1
+    assert "schema target is not a regular source file" in capsys.readouterr().err
+
+    assert run_main(["validate", "--root", str(elsewhere)]) == 1
+    assert "schema-resources.yml" in capsys.readouterr().err
+
+
+def test_root_that_is_not_a_folder_is_a_usage_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("KLEISIS_ROOT", raising=False)
+
+    assert run_main(["validate", "--root", str(tmp_path / "absent")]) == 2
+    assert "is not a folder" in capsys.readouterr().err
+
+
+def test_record_option_is_read_from_the_current_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = owned_reference("missing.schema.yaml")(tmp_path, monkeypatch)
+    monkeypatch.chdir(root / "specs")
+
+    # The record is read, so the run reaches the unresolved reference of the owned schema.
+    assert run_main(["validate", "--root", str(root), "--record", "schema-resources.yml"]) == 1
+    assert "schema target is not a regular source file" in capsys.readouterr().err
+
+    # A path relative to the root is no longer read: from `specs/`, it names a missing file.
+    status = run_main(["validate", "--root", str(root), "--record", "specs/schema-resources.yml"])
+    assert status == 1
+    assert "specs/specs/schema-resources.yml" in capsys.readouterr().err
+
+
+def test_record_outside_the_root_is_a_usage_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = owned_reference("missing.schema.yaml")(tmp_path, monkeypatch)
+    outside = tmp_path / "outside.yml"
+    outside.write_text("", encoding="utf-8")
+
+    assert run_main(["validate", "--root", str(root), "--record", str(outside)]) == 2
+    assert "lies outside the root" in capsys.readouterr().err
+
+
 def test_every_scenario_rule_and_every_catalogued_rule_agree() -> None:
     covered = set(SCENARIOS) | {"drift/resources", "drift/registry"}
     assert covered == {rule.id for rule in RULES}

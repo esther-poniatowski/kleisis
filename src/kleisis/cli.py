@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -16,6 +17,12 @@ from kleisis.sarif import sarif_log
 
 _REPORTING_COMMANDS = ("check", "validate")
 
+ROOT_VARIABLE = "KLEISIS_ROOT"
+"""Environment variable naming the root when ``--root`` is absent."""
+
+DEFAULT_RECORD = PurePosixPath("specs/schema-resources.yml")
+"""Path of the resource record below the root when ``--record`` is absent."""
+
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -27,12 +34,20 @@ def _parser() -> argparse.ArgumentParser:
         choices=("materialize", "check", "validate"),
         help="operation to perform",
     )
-    parser.add_argument("--root", type=Path, default=Path.cwd(), help="consumer repository root")
+    parser.add_argument(
+        "-v", "--version", action="version", version=__version__, help="print the version and exit"
+    )
+    parser.add_argument(
+        "-r",
+        "--root",
+        type=Path,
+        help=f"consumer repository root; by default ${ROOT_VARIABLE}, else the current folder",
+    )
     parser.add_argument(
         "--record",
-        type=PurePosixPath,
-        default=PurePosixPath("specs/schema-resources.yml"),
-        help="resource record path relative to the repository root",
+        type=Path,
+        help=f"resource record, read from the current folder and lying below the root; "
+        f"by default {DEFAULT_RECORD} below the root",
     )
     parser.add_argument(
         "--format",
@@ -42,6 +57,7 @@ def _parser() -> argparse.ArgumentParser:
         "sarif also writes a SARIF 2.1.0 log on standard output or at --output",
     )
     parser.add_argument(
+        "-o",
         "--output",
         type=Path,
         help="with --format sarif, write the log to this path instead of standard output; "
@@ -76,6 +92,34 @@ def _write_log(log: dict[str, Any], output: Path | None) -> None:
         raise SystemExit(2) from exc
 
 
+def _root(parser: argparse.ArgumentParser, given: Path | None) -> Path:
+    """Return the root named by ``--root``, by ``KLEISIS_ROOT`` or by the current folder.
+
+    Kleisis has no settings file of its own, so the root is never searched among the ancestors.
+    A root that is not a folder is a usage error.
+    """
+    if given is None:
+        variable = os.environ.get(ROOT_VARIABLE)
+        given = Path(variable) if variable else Path.cwd()
+    if not given.is_dir():
+        parser.error(f"the root {given} is not a folder")
+    return given.resolve()
+
+
+def _record(parser: argparse.ArgumentParser, root: Path, given: Path | None) -> PurePosixPath:
+    """Return the path of the resource record relative to ``root``.
+
+    A path given on the command line is read from the current folder, and must lie below the root,
+    since the record names the outputs of the root and every finding names it relative to the root.
+    """
+    if given is None:
+        return DEFAULT_RECORD
+    resolved = given.resolve()
+    if not resolved.is_relative_to(root):
+        parser.error(f"--record {given} lies outside the root {root}")
+    return PurePosixPath(resolved.relative_to(root).as_posix())
+
+
 def main(arguments: list[str] | None = None) -> None:
     """Run the selected operation and report a concise failure."""
     parser = _parser()
@@ -84,17 +128,18 @@ def main(arguments: list[str] | None = None) -> None:
         parser.error(f"--format sarif applies to {' and '.join(_REPORTING_COMMANDS)} only")
     if options.output is not None and options.format != "sarif":
         parser.error("--output requires --format sarif")
-    service = SchemaClosureService(options.record)
+    root = _root(parser, options.root)
+    service = SchemaClosureService(_record(parser, root, options.record))
     findings: tuple[Finding, ...] = ()
     failure: Exception | None = None
     stopped: str | None = None
     try:
         if options.command == "materialize":
-            service.materialize(options.root)
+            service.materialize(root)
         elif options.command == "check":
-            service.check(options.root)
+            service.check(root)
         else:
-            service.validate(options.root)
+            service.validate(root)
     except SchemaClosureError as exc:
         print(f"kleisis: {exc}", file=sys.stderr)
         findings, failure, stopped = exc.findings, exc, _stop_reason(exc)
