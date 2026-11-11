@@ -73,17 +73,12 @@ class SchemaClosureError(Exception):
 
 
 class RecordError(SchemaClosureError):
-    """A resource record violates its declared structure."""
-
-    default_rule = RECORD_INVALID
-
-
-class RecordFormatError(RecordError):
-    """A resource record declares no format, or a format other than the one Kleisis reads.
+    """A resource record violates its declared structure.
 
     The record is the configuration of the command, so the command stops with status 2.
     """
 
+    default_rule = RECORD_INVALID
     exit_status = 2
 
 

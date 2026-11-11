@@ -18,7 +18,7 @@ from kleisis.domain.models import (
     Source,
 )
 from kleisis.domain.registry import load_registry
-from kleisis.errors import DriftError, ReferenceError, RegistryError
+from kleisis.errors import DriftError, RecordError, ReferenceError, RegistryError
 from kleisis.infrastructure.publication import publish_pair
 from kleisis.infrastructure.sources import ExactSourceProvider
 
@@ -196,7 +196,7 @@ paths:
         encoding="utf-8",
     )
 
-    with pytest.raises(RegistryError, match="overlaps"):
+    with pytest.raises(RecordError, match="overlaps"):
         SchemaClosureService().load(root)
 
 

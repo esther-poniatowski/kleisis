@@ -22,7 +22,7 @@ from kleisis.domain.models import (
     SchemaConvention,
     safe_relative_path,
 )
-from kleisis.errors import RecordError, RecordFormatError
+from kleisis.errors import RecordError
 from kleisis.findings import RECORD_UNREADABLE, field_pointer, pointer
 
 RECORD_FORMAT = "kleisis:schema-resources@1"
@@ -106,15 +106,13 @@ def _check_format(root: dict[str, Any]) -> None:
     """Require the record to declare ``_schema: kleisis:schema-resources@1``, without alias."""
     expected = f"write _schema: {RECORD_FORMAT} as the first key"
     if "format_version" in root:
-        raise RecordFormatError(
+        raise RecordError(
             f"the key format_version is retired; {expected}", locus=pointer("format_version")
         )
     if "_schema" not in root:
-        raise RecordFormatError(
-            f"the record declares no _schema; {expected}", locus=pointer("_schema")
-        )
+        raise RecordError(f"the record declares no _schema; {expected}", locus=pointer("_schema"))
     if root["_schema"] != RECORD_FORMAT:
-        raise RecordFormatError(
+        raise RecordError(
             f"the record declares _schema {root['_schema']!r}; {expected}",
             locus=pointer("_schema"),
         )

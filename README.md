@@ -125,7 +125,7 @@ Each command works on one root, the consumer repository. The root is named by th
 
 Each command accepts the option `--record PATH` when the resource record does not lie at its default path `specs/schema-resources.yml` below the root. The path is read from the current folder, and must lie below the root.
 
-The exit status is 0 on success, 1 when the build, the validation or the check fails, and 2 on a usage error, on a resource record that does not declare its format, or when the SARIF log cannot be written. The option `-v`, `--version` prints the version.
+The exit status is 0 on success, 1 when the build, the validation or the check fails, and 2 on a usage error, on a resource record that is absent, unreadable or invalid, or when the SARIF log cannot be written. A resource record is the configuration of a command, so each of its faults, its format included, gives status 2. The option `-v`, `--version` prints the version.
 
 The commands `validate` and `check` also accept the option `--format sarif`. The command then writes a SARIF 2.1.0 log on standard output, in the findings profile of the gate Elenchos. The build stops at its first failure, so the log holds one result for that failure, or one per item when the failure lists several; `check` adds one result per generated output that differs. A successful run yields a log without result. The line on standard error and the exit status stay unchanged.
 

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from kleisis.domain.records import load_resource_record
-from kleisis.errors import RecordError, RecordFormatError
+from kleisis.errors import RecordError
 
 
 def write_record(tmp_path: Path, body: str) -> Path:
@@ -39,7 +39,7 @@ def test_defaults_are_conventional_repository_paths(tmp_path: Path) -> None:
 def test_a_record_without_its_format_identifier_is_rejected(
     tmp_path: Path, body: str, locus: str
 ) -> None:
-    with pytest.raises(RecordFormatError, match="_schema: kleisis:schema-resources@1") as caught:
+    with pytest.raises(RecordError, match="_schema: kleisis:schema-resources@1") as caught:
         load_resource_record(write_record(tmp_path, body))
     assert caught.value.exit_status == 2
     assert caught.value.findings[0].locus == locus

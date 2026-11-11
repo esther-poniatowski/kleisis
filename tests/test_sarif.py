@@ -310,6 +310,8 @@ resources: {}
 
 
 CONSUMER_RECORD = "_schema: kleisis:schema-resources@1\nexports: [consumer:owned@1]\n"
+#: Rules of a fault in the resource record, the configuration of the command: status 2.
+RECORD_RULES = {"record/unreadable", "record/invalid", "record/path-overlap", "path/escape"}
 SCENARIOS: dict[str, tuple[Scenario, list[str]]] = {
     "record/unreadable": (
         record_only("_schema: [\n"),
@@ -483,7 +485,7 @@ def test_validation_failure_yields_one_conforming_result_per_failure(
 
     status, log = run_sarif(capsys, "validate", root)
 
-    assert status == 1
+    assert status == (2 if rule in RECORD_RULES else 1)
     assert log_violations(log) == []
     assert [result["ruleId"] for result in log["runs"][0]["results"]] == [rule] * len(expected)
     assert identities(log) == expected
@@ -675,7 +677,8 @@ def test_root_is_read_from_the_environment_then_overridden_by_the_option(
     assert run_main(["validate"]) == 1
     assert "schema target is not a regular source file" in capsys.readouterr().err
 
-    assert run_main(["validate", "--root", str(elsewhere)]) == 1
+    # Without a resource record the command has no configuration, which is a status-2 error.
+    assert run_main(["validate", "--root", str(elsewhere)]) == 2
     assert "schema-resources.yml" in capsys.readouterr().err
 
 
@@ -700,7 +703,7 @@ def test_record_option_is_read_from_the_current_folder(
 
     # A path relative to the root is no longer read: from `specs/`, it names a missing file.
     status = run_main(["validate", "--root", str(root), "--record", "specs/schema-resources.yml"])
-    assert status == 1
+    assert status == 2
     assert "specs/specs/schema-resources.yml" in capsys.readouterr().err
 
 

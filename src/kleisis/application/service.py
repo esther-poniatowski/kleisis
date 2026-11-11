@@ -32,7 +32,7 @@ from kleisis.domain.registry import (
     registry_bytes,
     resource_map,
 )
-from kleisis.errors import DriftError, RegistryError, SchemaClosureError
+from kleisis.errors import DriftError, RecordError, RegistryError, SchemaClosureError
 from kleisis.findings import (
     CONTRACT_DUPLICATE,
     CONTRACT_UNEXPORTED,
@@ -113,7 +113,7 @@ class SchemaClosureService:
         }
         for name, path in protected.items():
             if _paths_overlap(record.paths.resources, path):
-                raise RegistryError(
+                raise RecordError(
                     f"paths.resources overlaps {name}: {path}",
                     rule=RECORD_PATH_OVERLAP,
                     subject=self.record_path,
@@ -121,7 +121,7 @@ class SchemaClosureService:
                     discriminator=path.as_posix(),
                 )
         if record.paths.registry == self.record_path:
-            raise RegistryError(
+            raise RecordError(
                 "paths.registry must differ from the resource record",
                 rule=RECORD_PATH_OVERLAP,
                 subject=self.record_path,
@@ -129,7 +129,7 @@ class SchemaClosureService:
             )
         for project in record.projects:
             if _paths_overlap(record.paths.resources, project.path):
-                raise RegistryError(
+                raise RecordError(
                     f"paths.resources overlaps project checkout: {project.path}",
                     rule=RECORD_PATH_OVERLAP,
                     subject=self.record_path,
