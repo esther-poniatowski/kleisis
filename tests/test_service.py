@@ -1,5 +1,6 @@
 """Integration tests for exact materialization and drift detection."""
 
+import json
 import shutil
 import tempfile
 from pathlib import Path, PurePosixPath
@@ -22,7 +23,7 @@ from kleisis.errors import DriftError, RecordError, ReferenceError, RegistryErro
 from kleisis.infrastructure.publication import publish_pair
 from kleisis.infrastructure.sources import ExactSourceProvider
 
-RECORD_MARKER = "_schema: kleisis:schema-resources@1\n"
+RECORD_MARKER = "_schema: kleisis:schema-resources@2\n"
 REGISTRY_MARKER = "_schema: kleisis:schema-registry@2"
 RECEIPT_MARKER = "_schema: kleisis:receipt@1"
 
@@ -35,7 +36,7 @@ def make_consumer(root: Path, commit: str) -> None:
         concrete_schema("consumer:owned@1"), encoding="utf-8"
     )
     (root / "specs/schema-resources.yml").write_text(
-        f"""_schema: kleisis:schema-resources@1
+        f"""_schema: kleisis:schema-resources@2
 exports:
   - consumer:owned@1
 dependencies:
@@ -162,12 +163,12 @@ def test_materialize_publishes_closure_and_registry(
 
     service.materialize(consumer)
 
-    assert (consumer / ".schema-resources/shared/schemas/main.schema.yaml").is_file()
-    assert (consumer / ".schema-resources/shared/schemas/defs.schema.yaml").is_file()
+    assert (consumer / ".kleisis/resources/shared/schemas/main.schema.yaml").is_file()
+    assert (consumer / ".kleisis/resources/shared/schemas/defs.schema.yaml").is_file()
     registry = load_registry(consumer / "specs/schema-registry.yml")
     assert registry.exports == ("consumer:owned@1",)
     assert registry.schemas["source:main@1"].as_posix() == (
-        ".schema-resources/shared/schemas/main.schema.yaml"
+        ".kleisis/resources/shared/schemas/main.schema.yaml"
     )
     service.check(consumer)
 
@@ -178,7 +179,7 @@ def test_check_detects_resource_drift(tmp_path: Path, exact_source: tuple[Path, 
     make_consumer(consumer, commit)
     service = SchemaClosureService(source_provider=CopySourceProvider(source))
     service.materialize(consumer)
-    target = consumer / ".schema-resources/shared/schemas/main.schema.yaml"
+    target = consumer / ".kleisis/resources/shared/schemas/main.schema.yaml"
     target.write_text(target.read_text(encoding="utf-8") + "# drift\n", encoding="utf-8")
 
     with pytest.raises(DriftError, match="resources differ"):
@@ -189,7 +190,7 @@ def test_resource_path_cannot_overlap_sources(tmp_path: Path) -> None:
     root = tmp_path / "consumer"
     (root / "specs/schemas").mkdir(parents=True)
     (root / "specs/schema-resources.yml").write_text(
-        """_schema: kleisis:schema-resources@1
+        """_schema: kleisis:schema-resources@2
 paths:
   resources: specs
 """,
@@ -197,6 +198,108 @@ paths:
     )
 
     with pytest.raises(RecordError, match="overlaps"):
+        SchemaClosureService().load(root)
+
+
+def test_materialize_publishes_in_a_configured_state_folder(
+    tmp_path: Path, exact_source: tuple[Path, str]
+) -> None:
+    source, commit = exact_source
+    consumer = tmp_path / "consumer"
+    make_consumer(consumer, commit)
+    record = consumer / "specs/schema-resources.yml"
+    record.write_text(
+        record.read_text(encoding="utf-8") + "paths:\n  state: var/kleisis\n", encoding="utf-8"
+    )
+    service = SchemaClosureService(source_provider=CopySourceProvider(source))
+
+    service.materialize(consumer)
+
+    assert (consumer / "var/kleisis/resources/shared/schemas/main.schema.yaml").is_file()
+    assert not (consumer / ".kleisis").exists()
+    registry = load_registry(consumer / "specs/schema-registry.yml")
+    assert registry.schemas["source:main@1"].as_posix() == (
+        "var/kleisis/resources/shared/schemas/main.schema.yaml"
+    )
+    service.check(consumer)
+
+
+def test_materialize_recovers_a_journal_left_at_the_former_place(
+    tmp_path: Path, exact_source: tuple[Path, str]
+) -> None:
+    """A journal of an earlier release is recovered, at the former resources, before publishing."""
+    source, commit = exact_source
+    consumer = tmp_path / "consumer"
+    make_consumer(consumer, commit)
+    former = consumer / ".schema-resources"
+    former.mkdir()
+    (former / "old").write_text("old resources", encoding="utf-8")
+    registry = consumer / "specs/schema-registry.yml"
+    transaction = "a" * 32
+    former_backup = former.with_name(f".{former.name}.kleisis-{transaction}.backup")
+    registry_backup = registry.with_name(f".{registry.name}.kleisis-{transaction}.backup")
+    former.rename(former_backup)
+    registry_backup.write_text("old registry", encoding="utf-8")
+    journal = consumer / ".kleisis-transaction.json"
+    journal.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {"target": str(former), "backup": str(former_backup), "had_target": True},
+                    {"target": str(registry), "backup": str(registry_backup), "had_target": True},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    service = SchemaClosureService(source_provider=CopySourceProvider(source))
+
+    service.materialize(consumer)
+
+    assert not journal.exists()
+    assert (former / "old").read_text(encoding="utf-8") == "old resources"
+    assert not former_backup.exists()
+    assert not registry_backup.exists()
+    assert (consumer / ".kleisis/resources/shared/schemas/main.schema.yaml").is_file()
+    service.check(consumer)
+
+
+@pytest.mark.parametrize(
+    "paths, field",
+    [
+        ("  state: specs\n", "paths.state overlaps paths.owned_schemas"),
+        ("  state: specs/schema-registry.yml\n", "paths.state overlaps paths.registry"),
+        ("  state: specs/schema-resources.yml\n", "paths.state overlaps record path"),
+        ("  state: var\n  resources: var\n", "paths.resources must not contain paths.state"),
+        (
+            "  state: var/kleisis\n  resources: var\n",
+            "paths.resources must not contain paths.state",
+        ),
+    ],
+)
+def test_state_folder_cannot_overlap_sources_or_resources(
+    tmp_path: Path, paths: str, field: str
+) -> None:
+    root = tmp_path / "consumer"
+    (root / "specs/schemas").mkdir(parents=True)
+    (root / "specs/schema-resources.yml").write_text(
+        f"{RECORD_MARKER}paths:\n{paths}", encoding="utf-8"
+    )
+
+    with pytest.raises(RecordError, match=field):
+        SchemaClosureService().load(root)
+
+
+def test_state_folder_cannot_overlap_a_child_checkout(tmp_path: Path) -> None:
+    root = tmp_path / "consumer"
+    (root / "specs/schemas").mkdir(parents=True)
+    (root / "specs/schema-resources.yml").write_text(
+        f"{RECORD_MARKER}paths:\n  state: projects\n  resources: resources\n"
+        "projects:\n  - path: projects/child\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RecordError, match="paths.state overlaps project checkout"):
         SchemaClosureService().load(root)
 
 
@@ -226,7 +329,7 @@ def test_exported_schema_closure_must_be_present(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     (root / "specs/schema-resources.yml").write_text(
-        "_schema: kleisis:schema-resources@1\nexports: [consumer:owned@1]\n", encoding="utf-8"
+        "_schema: kleisis:schema-resources@2\nexports: [consumer:owned@1]\n", encoding="utf-8"
     )
 
     with pytest.raises(ReferenceError, match="not a regular source file"):
@@ -244,7 +347,7 @@ def test_every_owned_contract_must_be_exported(tmp_path: Path) -> None:
         concrete_schema("consumer:hidden@1"), encoding="utf-8"
     )
     (root / "specs/schema-resources.yml").write_text(
-        "_schema: kleisis:schema-resources@1\nexports: [consumer:exported@1]\n", encoding="utf-8"
+        "_schema: kleisis:schema-resources@2\nexports: [consumer:exported@1]\n", encoding="utf-8"
     )
 
     with pytest.raises(RegistryError, match="owned contracts are absent from exports"):
@@ -259,7 +362,7 @@ def test_the_record_convention_selects_the_owned_contracts(tmp_path: Path) -> No
         "required: [kind]\nproperties:\n  kind: {const: consumer:record@1}\n", encoding="utf-8"
     )
     (root / "specs/schema-resources.yml").write_text(
-        "_schema: kleisis:schema-resources@1\n"
+        "_schema: kleisis:schema-resources@2\n"
         "schemas: {suffixes: [.contract.yml], binding: kind}\n"
         "exports: [consumer:record@1]\n",
         encoding="utf-8",
@@ -318,8 +421,8 @@ def test_publication_rolls_back_both_outputs(
 ) -> None:
     root = tmp_path / "consumer"
     root.mkdir()
-    resources_target = root / ".schema-resources"
-    resources_target.mkdir()
+    resources_target = root / ".kleisis/resources"
+    resources_target.mkdir(parents=True)
     (resources_target / "old").write_text("old resources", encoding="utf-8")
     registry_target = root / "specs/schema-registry.yml"
     registry_target.parent.mkdir()
@@ -341,12 +444,13 @@ def test_publication_rolls_back_both_outputs(
     with pytest.raises(OSError, match="planted registry replacement failure"):
         publish_pair(
             root,
+            root / ".kleisis",
             [(resources_candidate, resources_target), (registry_candidate, registry_target)],
         )
 
     assert (resources_target / "old").read_text(encoding="utf-8") == "old resources"
     assert registry_target.read_text(encoding="utf-8") == "old registry"
-    assert not (root / ".kleisis-transaction.json").exists()
+    assert sorted(path.name for path in (root / ".kleisis").iterdir()) == ["resources"]
 
 
 def test_composite_registry_imports_child_exports_and_checks_shared_bytes(
@@ -359,7 +463,7 @@ def test_composite_registry_imports_child_exports_and_checks_shared_bytes(
     shared = concrete_schema("shared:contract@1")
     (schemas / "shared.schema.yaml").write_text(shared, encoding="utf-8")
     (root / "specs/schema-resources.yml").write_text(
-        """_schema: kleisis:schema-resources@1
+        """_schema: kleisis:schema-resources@2
 exports: [parent:owned@1, shared:contract@1]
 projects:
   - path: projects/child
@@ -399,7 +503,7 @@ def test_composite_registry_rejects_missing_child_export_closure(tmp_path: Path)
     schemas.mkdir(parents=True)
     (schemas / "parent.schema.yaml").write_text(concrete_schema("parent:owned@1"), encoding="utf-8")
     (root / "specs/schema-resources.yml").write_text(
-        """_schema: kleisis:schema-resources@1
+        """_schema: kleisis:schema-resources@2
 exports: [parent:owned@1]
 projects:
   - path: projects/child
@@ -496,7 +600,7 @@ exports: [shared:main@1]
             "specs/schemas/owned.schema.yaml": concrete_schema(
                 "consumer:owned@1", reference=owned_reference
             ),
-            "specs/schema-resources.yml": f"""_schema: kleisis:schema-resources@1
+            "specs/schema-resources.yml": f"""_schema: kleisis:schema-resources@2
 exports: [consumer:owned@1]
 dependencies:
   - id: shared
@@ -519,7 +623,7 @@ def test_closure_spans_two_sources_through_absolute_identifiers(tmp_path: Path) 
 
     service.materialize(consumer)
 
-    resources = consumer / ".schema-resources"
+    resources = consumer / ".kleisis/resources"
     assert sorted(
         path.relative_to(resources).as_posix() for path in resources.rglob("*.schema.yaml")
     ) == [
@@ -531,8 +635,8 @@ def test_closure_spans_two_sources_through_absolute_identifiers(tmp_path: Path) 
     ]
     registry = load_registry(consumer / "specs/schema-registry.yml")
     assert {uri: path.as_posix() for uri, path in registry.resources.items()} == {
-        LABEL: ".schema-resources/primitives/schemas/label.schema.yaml",
-        NOTE: ".schema-resources/primitives/schemas/note.schema.yaml",
+        LABEL: ".kleisis/resources/primitives/schemas/label.schema.yaml",
+        NOTE: ".kleisis/resources/primitives/schemas/note.schema.yaml",
     }
     assert (consumer / "specs/schema-registry.yml").read_text(encoding="utf-8").splitlines()[
         1
@@ -545,7 +649,7 @@ def test_receipt_declares_its_format_first(tmp_path: Path) -> None:
 
     SchemaClosureService(source_provider=provider).materialize(consumer)
 
-    lines = (consumer / ".schema-resources/receipt.yml").read_text(encoding="utf-8").splitlines()
+    lines = (consumer / ".kleisis/resources/receipt.yml").read_text(encoding="utf-8").splitlines()
     assert lines[0] == RECEIPT_MARKER
     assert not any(line.startswith("format_version") for line in lines)
 
@@ -559,7 +663,7 @@ def test_receipt_in_another_format_is_stale(tmp_path: Path, header: str) -> None
     consumer, provider = make_two_sources(tmp_path, NOTE)
     service = SchemaClosureService(source_provider=provider)
     service.materialize(consumer)
-    receipt = consumer / ".schema-resources/receipt.yml"
+    receipt = consumer / ".kleisis/resources/receipt.yml"
     lines = receipt.read_text(encoding="utf-8").splitlines(keepends=True)
     receipt.write_text("".join([f"{header}\n" if header else "", *lines[1:]]), encoding="utf-8")
 
@@ -683,7 +787,7 @@ def make_parent_with_resource_child(tmp_path: Path, child_label: str) -> Path:
         {
             "specs/schemas/parent.schema.yaml": concrete_schema("parent:owned@1"),
             "specs/schemas/label.schema.yaml": f"$id: {LABEL}\ntype: string\n",
-            "specs/schema-resources.yml": """_schema: kleisis:schema-resources@1
+            "specs/schema-resources.yml": """_schema: kleisis:schema-resources@2
 exports: [parent:owned@1]
 projects:
   - path: projects/child
@@ -761,7 +865,7 @@ def make_resource_only(
             "specs/schemas/owned.schema.yaml": concrete_schema(
                 "consumer:owned@1", reference=owned_reference
             ),
-            "specs/schema-resources.yml": f"""_schema: kleisis:schema-resources@1
+            "specs/schema-resources.yml": f"""_schema: kleisis:schema-resources@2
 exports: [consumer:owned@1]
 dependencies:
   - id: primitives
@@ -779,14 +883,14 @@ def test_resource_only_dependency_serves_an_absolute_reference(tmp_path: Path) -
 
     service.materialize(consumer)
 
-    resources = consumer / ".schema-resources"
+    resources = consumer / ".kleisis/resources"
     assert sorted(
         path.relative_to(resources).as_posix() for path in resources.rglob("*.schema.yaml")
     ) == ["primitives/schemas/label.schema.yaml", "primitives/schemas/text.schema.yaml"]
     registry = load_registry(consumer / "specs/schema-registry.yml")
     assert set(registry.schemas) == {"consumer:owned@1"}
     assert {uri: path.as_posix() for uri, path in registry.resources.items()} == {
-        LABEL: ".schema-resources/primitives/schemas/label.schema.yaml"
+        LABEL: ".kleisis/resources/primitives/schemas/label.schema.yaml"
     }
     service.check(consumer)
 
@@ -867,7 +971,7 @@ def test_vault_rooted_reference_in_a_child_export_closure_fails(tmp_path: Path) 
         tmp_path / "parent",
         {
             "specs/schemas/parent.schema.yaml": concrete_schema("parent:owned@1"),
-            "specs/schema-resources.yml": """_schema: kleisis:schema-resources@1
+            "specs/schema-resources.yml": """_schema: kleisis:schema-resources@2
 exports: [parent:owned@1]
 projects:
   - path: projects/child

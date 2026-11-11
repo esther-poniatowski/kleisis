@@ -13,6 +13,8 @@ from kleisis.domain.documents import load_document
 from kleisis.domain.models import (
     DEFAULT_BINDING,
     DEFAULT_SCHEMA_SUFFIXES,
+    FORMER_RESOURCES,
+    RESOURCES_IN_STATE,
     ArtifactSource,
     Dependency,
     GitSource,
@@ -25,8 +27,19 @@ from kleisis.domain.models import (
 from kleisis.errors import RecordError
 from kleisis.findings import RECORD_UNREADABLE, field_pointer, pointer
 
-RECORD_FORMAT = "kleisis:schema-resources@1"
-"""The format identifier that a resource record declares in its first key ``_schema``."""
+FORMAT_MAJOR = 2
+"""The major version of the resource-record format that this release reads."""
+RECORD_FORMAT = f"kleisis:schema-resources@{FORMAT_MAJOR}"
+"""The format identifier that a resource record declares in its first key ``_schema``.
+
+Format 2 moved the default of ``paths.resources`` from ``.schema-resources`` into the state
+folder, so a record of format 1 that omits the key would be read at another place.
+"""
+_FORMAT_1_NOTE = (
+    f"format 2 moved the default of paths.resources from {FORMER_RESOURCES} to "
+    f"<paths.state>/{RESOURCES_IN_STATE}; a record that keeps the former folder sets "
+    f"paths.resources: {FORMER_RESOURCES}"
+)
 
 _FULL_COMMIT = re.compile(r"[0-9a-f]{40}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -103,17 +116,23 @@ def load_resource_record(path: Path) -> ResourceRecord:
 
 
 def _check_format(root: dict[str, Any]) -> None:
-    """Require the record to declare ``_schema: kleisis:schema-resources@1``, without alias."""
+    """Require the record to declare ``_schema: kleisis:schema-resources@2``, without alias.
+
+    A record of format 1, by ``_schema`` or by the retired key ``format_version``, is rejected
+    with the change of default that its upgrade must take into account.
+    """
     expected = f"write _schema: {RECORD_FORMAT} as the first key"
     if "format_version" in root:
         raise RecordError(
-            f"the key format_version is retired; {expected}", locus=pointer("format_version")
+            f"the key format_version is retired; {expected}; {_FORMAT_1_NOTE}",
+            locus=pointer("format_version"),
         )
     if "_schema" not in root:
         raise RecordError(f"the record declares no _schema; {expected}", locus=pointer("_schema"))
     if root["_schema"] != RECORD_FORMAT:
+        note = f"; {_FORMAT_1_NOTE}" if root["_schema"] == "kleisis:schema-resources@1" else ""
         raise RecordError(
-            f"the record declares _schema {root['_schema']!r}; {expected}",
+            f"the record declares _schema {root['_schema']!r}; {expected}{note}",
             locus=pointer("_schema"),
         )
 
@@ -128,17 +147,22 @@ def _resource_record(raw: object) -> ResourceRecord:
     )
 
     raw_paths = _mapping(root.get("paths", {}), "paths")
-    _keys(raw_paths, {"owned_schemas", "registry", "resources"}, "paths")
+    _keys(raw_paths, {"owned_schemas", "registry", "resources", "state"}, "paths")
+    defaults = Paths()
+    state = safe_relative_path(raw_paths.get("state", defaults.state.as_posix()), "paths.state")
     paths = Paths(
         owned_schemas=safe_relative_path(
-            raw_paths.get("owned_schemas", "specs/schemas"), "paths.owned_schemas"
+            raw_paths.get("owned_schemas", defaults.owned_schemas.as_posix()),
+            "paths.owned_schemas",
         ),
         registry=safe_relative_path(
-            raw_paths.get("registry", "specs/schema-registry.yml"), "paths.registry"
+            raw_paths.get("registry", defaults.registry.as_posix()), "paths.registry"
         ),
         resources=safe_relative_path(
-            raw_paths.get("resources", ".schema-resources"), "paths.resources"
+            raw_paths.get("resources", (state / RESOURCES_IN_STATE).as_posix()),
+            "paths.resources",
         ),
+        state=state,
     )
 
     schemas = _schema_convention(root.get("schemas", {}))
@@ -305,7 +329,7 @@ def _resource_record(raw: object) -> ResourceRecord:
         projects.append(Project(path=project_path, required=required))
 
     return ResourceRecord(
-        format_version=1,
+        format_version=FORMAT_MAJOR,
         paths=paths,
         schemas=schemas,
         exports=exports,

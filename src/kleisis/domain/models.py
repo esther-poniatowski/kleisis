@@ -76,13 +76,27 @@ DEFAULT_CONVENTION = SchemaConvention()
 """The schema convention of a resource record that declares none."""
 
 
+DEFAULT_STATE = PurePosixPath(".kleisis")
+"""The state folder of a resource record that declares none."""
+RESOURCES_IN_STATE = "resources"
+"""The name of the resources folder inside the state folder, unless the record declares one."""
+FORMER_RESOURCES = PurePosixPath(".schema-resources")
+"""The default resources folder of format 1, which a journal of an earlier release may name."""
+
+
 @dataclass(frozen=True)
 class Paths:
-    """Repository paths controlled by the resource record."""
+    """Repository paths controlled by the resource record.
+
+    The state folder holds what Kleisis alone reads: the resources folder by default, the
+    publication journal and its backups. The defaults are those of a record that declares no
+    path.
+    """
 
     owned_schemas: PurePosixPath = PurePosixPath("specs/schemas")
     registry: PurePosixPath = PurePosixPath("specs/schema-registry.yml")
-    resources: PurePosixPath = PurePosixPath(".schema-resources")
+    resources: PurePosixPath = DEFAULT_STATE / RESOURCES_IN_STATE
+    state: PurePosixPath = DEFAULT_STATE
 
 
 @dataclass(frozen=True)

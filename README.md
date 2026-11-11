@@ -35,7 +35,7 @@ The resource record governs four inputs:
 This record template uses the conventional paths and selects one contract from an exact Git state. Replace the example commit with the required source commit:
 
 ```yaml
-_schema: kleisis:schema-resources@1
+_schema: kleisis:schema-resources@2
 
 exports:
   - mixture:question@1
@@ -54,7 +54,9 @@ dependencies:
       - geonexus:project@1
 ```
 
-The record declares its format in its first key, `_schema: kleisis:schema-resources@1`. A record without this key, with another value, or with the retired key `format_version` stops each command with status 2, and the message names the value to write.
+The record declares its format in its first key, `_schema: kleisis:schema-resources@2`. A record without this key, with another value, or with the retired key `format_version` stops each command with status 2, and the message names the value to write.
+
+Format 2 moved the default resource directory from `.schema-resources` into the state folder `.kleisis/`. A record of format 1 that omits `paths.resources` would therefore be read at another place, so the format raised its major number. To upgrade a record of format 1, write `_schema: kleisis:schema-resources@2`; to keep the former resource directory, also write `paths.resources: .schema-resources`.
 
 Each dependency identifier uses lower kebab-case. Each Git source uses a web address that starts with `https://`, contains no authentication data and names a full lowercase commit. Instead, an artifact source declares a web address that starts with `https://` and contains no authentication data. The artifact source also declares its source commit and a 256-bit digest.
 
@@ -87,21 +89,26 @@ A vault-rooted `$ref`, which starts with `/`, is resolved by Ekphrasis from the 
 
 Tar archives contribute regular files and directories only. A link with a valid member path is omitted, while an invalid member path still invalidates the archive. Retained ZIP artifacts reject symbolic links. Therefore, a selected registry or schema supplied only through a link remains absent and fails validation.
 
-The optional key `paths` overrides three repository-relative paths:
+The optional key `paths` overrides four repository-relative paths. The values below are the defaults:
 
 ```yaml
 paths:
-  owned_schemas: utils/schemas
+  owned_schemas: specs/schemas
   registry: specs/schema-registry.yml
-  resources: .schema-resources
+  state: .kleisis
+  resources: .kleisis/resources
 ```
 
-Keep the resource directory disjoint from these source and control paths:
+The state folder `state` holds what Kleisis alone reads: the resource directory by default, and the journal and backups of a publication while it runs. When the record sets `state` and omits `resources`, the resource directory is `<state>/resources`. A record that sets `resources` keeps that directory wherever the state folder lies.
+
+Keep the state folder and the resource directory disjoint from these source and control paths:
 
 - the owned schema directory;
 - the generated registry;
 - the resource record;
 - each declared child checkout.
+
+The resource directory may lie inside the state folder, but must not contain it or equal it: a publication replaces the resource directory, and the journal of that publication lies in the state folder.
 
 The optional key `schemas` overrides the two names by which Kleisis recognizes the owned schemas. The key `suffixes` lists the name endings of the schema files, and the key `binding` names the root property that carries the identifier of a contract. Each key keeps its default value when the record omits it:
 
@@ -118,7 +125,7 @@ A suffix opens with a dot and holds no path separator. A binding is a property n
 The three commands keep writes separate from checks:
 
 - The validation command `kleisis validate --root .` builds the complete candidate state without changing the repository.
-- The materialization command `kleisis materialize --root .` replaces both generated outputs. If either write fails, the command attempts to restore both outputs immediately. If the command cannot restore them, it retains the transaction record so a later run can recover them.
+- The materialization command `kleisis materialize --root .` replaces both generated outputs. If either write fails, the command attempts to restore both outputs immediately. If the command cannot restore them, it retains its journal in the state folder so a later run can recover them.
 - The check command `kleisis check --root .` rematerializes in an isolated directory and fails when either generated output differs.
 
 Each command works on one root, the consumer repository. The root is named by the option `-r`, `--root`, or else by the environment variable `KLEISIS_ROOT`, or else is the current folder. Kleisis reads no configuration file of its own, so it never searches the ancestors of the current folder. A root that is not a folder is a usage error.
@@ -148,13 +155,19 @@ These commands validate the closure through Kleisis's resolver. The separate con
 
 ## Generated state
 
-The materialization command writes two consumer outputs and one receipt:
+The materialization command writes two consumer outputs and one receipt, shown at their default paths:
 
 | Output | Version-control status | Function |
 | --- | --- | --- |
-| `.schema-resources/` | ignored | stores exact external schemas and their reference closure across declared dependencies |
-| `.schema-resources/receipt.yml` | ignored | records each exact source and copied-file digest |
+| `.kleisis/resources/` | ignored | stores exact external schemas and their reference closure across declared dependencies |
+| `.kleisis/resources/receipt.yml` | ignored | records each exact source and copied-file digest |
 | `specs/schema-registry.yml` | tracked | maps owned, selected external and imported child identifiers, and each absolute `$id`, to local paths |
+
+A consumer excludes the state folder `.kleisis/` from version control. During a publication, the state folder also holds the journal `transaction.json` and one backup of each output; a successful or rolled-back publication deletes both.
+
+The registry names each materialized file by its repository path. Therefore, a consumer whose record omits `paths.resources` obtains a different registry when it first materializes with format 2, since its files move from `.schema-resources/` to `.kleisis/resources/`. The former directory `.schema-resources/` is then no longer read or written, and can be deleted.
+
+An earlier release left its journal at the root, as `.kleisis-transaction.json` or `.schema-closure-transaction.json`, with each backup beside its output. The materialization command still recovers such a journal before it builds, including a journal that names the resources at `.schema-resources/`. Publication refuses to start while any journal exists, at the current place or a former one.
 
 The receipt declares `_schema: kleisis:receipt@1` as its first key. No command reads a receipt back: `check` compares it by bytes with a fresh build, so a receipt in another format reports drift until `materialize` rewrites it.
 

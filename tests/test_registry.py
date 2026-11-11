@@ -164,7 +164,7 @@ def test_version_one_registry_admits_no_resources(tmp_path: Path) -> None:
     [
         "",
         "_schema: kleisis:schema-registry@3\n",
-        "_schema: kleisis:schema-resources@1\n",
+        "_schema: kleisis:schema-resources@2\n",
         "_schema: 2\n",
         "_schema: kleisis:schema-registry@2\nschema_version: 2\n",
         "schema_version: 3\n",

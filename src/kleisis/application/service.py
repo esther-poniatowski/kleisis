@@ -18,6 +18,7 @@ from kleisis.application.materialization import (
 )
 from kleisis.application.ports import SourceProvider
 from kleisis.domain.models import (
+    FORMER_RESOURCES,
     MaterializedDependency,
     Registry,
     ResourceRecord,
@@ -75,6 +76,18 @@ def _paths_overlap(first: PurePosixPath, second: PurePosixPath) -> bool:
     return first == second or first in second.parents or second in first.parents
 
 
+def _former_targets(root: Path, registry_target: Path) -> set[Path] | None:
+    """Return the outputs that a journal of an earlier release may name.
+
+    Format 1 of the resource record placed the resources at ``FORMER_RESOURCES`` by default, so
+    a journal left by an interrupted run of that release names them there.
+    """
+    former = (root / Path(FORMER_RESOURCES)).resolve()
+    if not former.is_relative_to(root):
+        return None
+    return {former, registry_target}
+
+
 @contextmanager
 def _relocated(roots: Sequence[tuple[Path, PurePosixPath]]) -> Iterator[None]:
     """Report the subject of each failure below one of ``roots`` by its repository path."""
@@ -111,15 +124,34 @@ class SchemaClosureService:
             "paths.registry": record.paths.registry,
             "record path": self.record_path,
         }
-        for name, path in protected.items():
-            if _paths_overlap(record.paths.resources, path):
-                raise RecordError(
-                    f"paths.resources overlaps {name}: {path}",
-                    rule=RECORD_PATH_OVERLAP,
-                    subject=self.record_path,
-                    locus=pointer("paths", "resources"),
-                    discriminator=path.as_posix(),
-                )
+        # The state first: the default resources folder lies inside it, so an overlap of the
+        # state is reported at the key that causes it.
+        controlled = {
+            "state": record.paths.state,
+            "resources": record.paths.resources,
+        }
+        for field, controlled_path in controlled.items():
+            for name, path in protected.items():
+                if _paths_overlap(controlled_path, path):
+                    raise RecordError(
+                        f"paths.{field} overlaps {name}: {path}",
+                        rule=RECORD_PATH_OVERLAP,
+                        subject=self.record_path,
+                        locus=pointer("paths", field),
+                        discriminator=path.as_posix(),
+                    )
+        if (
+            record.paths.resources == record.paths.state
+            or record.paths.resources in record.paths.state.parents
+        ):
+            raise RecordError(
+                "paths.resources must not contain paths.state, which holds the publication "
+                f"journal: {record.paths.state}",
+                rule=RECORD_PATH_OVERLAP,
+                subject=self.record_path,
+                locus=pointer("paths", "resources"),
+                discriminator=record.paths.state.as_posix(),
+            )
         if record.paths.registry == self.record_path:
             raise RecordError(
                 "paths.registry must differ from the resource record",
@@ -128,14 +160,15 @@ class SchemaClosureService:
                 locus=pointer("paths", "registry"),
             )
         for project in record.projects:
-            if _paths_overlap(record.paths.resources, project.path):
-                raise RecordError(
-                    f"paths.resources overlaps project checkout: {project.path}",
-                    rule=RECORD_PATH_OVERLAP,
-                    subject=self.record_path,
-                    locus=pointer("paths", "resources"),
-                    discriminator=project.path.as_posix(),
-                )
+            for field, controlled_path in controlled.items():
+                if _paths_overlap(controlled_path, project.path):
+                    raise RecordError(
+                        f"paths.{field} overlaps project checkout: {project.path}",
+                        rule=RECORD_PATH_OVERLAP,
+                        subject=self.record_path,
+                        locus=pointer("paths", field),
+                        discriminator=project.path.as_posix(),
+                    )
         return record
 
     @contextmanager
@@ -375,13 +408,20 @@ class SchemaClosureService:
             record = self.load(root)
             resources_target = resolve_inside(root, record.paths.resources, "paths.resources")
             registry_target = resolve_inside(root, record.paths.registry, "paths.registry")
-            recover_transaction(root, {resources_target, registry_target})
+            state = resolve_inside(root, record.paths.state, "paths.state")
+            recover_transaction(
+                root,
+                state,
+                {resources_target, registry_target},
+                _former_targets(root, registry_target),
+            )
             candidate = self.build(root)
             registry_candidate = candidate.resources.parent / "schema-registry.yml"
             registry_candidate.write_bytes(registry_bytes(candidate.registry))
             try:
                 publish_pair(
                     root,
+                    state,
                     [
                         (candidate.resources, resources_target),
                         (registry_candidate, registry_target),

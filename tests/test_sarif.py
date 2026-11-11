@@ -292,7 +292,7 @@ def child_with_missing_dependency(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         tmp_path / "parent",
         {
             "specs/schemas/parent.schema.yaml": concrete_schema("parent:owned@1"),
-            "specs/schema-resources.yml": """_schema: kleisis:schema-resources@1
+            "specs/schema-resources.yml": """_schema: kleisis:schema-resources@2
 exports: [parent:owned@1]
 projects:
   - path: projects/child
@@ -309,7 +309,7 @@ resources: {}
     )
 
 
-CONSUMER_RECORD = "_schema: kleisis:schema-resources@1\nexports: [consumer:owned@1]\n"
+CONSUMER_RECORD = "_schema: kleisis:schema-resources@2\nexports: [consumer:owned@1]\n"
 #: Rules of a fault in the resource record, the configuration of the command: status 2.
 RECORD_RULES = {"record/unreadable", "record/invalid", "record/path-overlap", "path/escape"}
 SCENARIOS: dict[str, tuple[Scenario, list[str]]] = {
@@ -322,15 +322,15 @@ SCENARIOS: dict[str, tuple[Scenario, list[str]]] = {
         [f"kleisis|record/invalid|{RECORD}|/exports"],
     ),
     "record/path-overlap": (
-        record_only("_schema: kleisis:schema-resources@1\npaths:\n  resources: specs\n"),
+        record_only("_schema: kleisis:schema-resources@2\npaths:\n  resources: specs\n"),
         [f"kleisis|record/path-overlap|{RECORD}|/paths/resources|specs/schemas"],
     ),
     "path/escape": (
-        record_only("_schema: kleisis:schema-resources@1\npaths:\n  owned_schemas: ../outside\n"),
+        record_only("_schema: kleisis:schema-resources@2\npaths:\n  owned_schemas: ../outside\n"),
         [f"kleisis|path/escape|{RECORD}|/paths/owned_schemas"],
     ),
     "path/absent": (
-        record_only("_schema: kleisis:schema-resources@1\n", owned=False),
+        record_only("_schema: kleisis:schema-resources@2\n", owned=False),
         [f"kleisis|path/absent|{RECORD}|/paths/owned_schemas"],
     ),
     "source/unavailable": (
@@ -340,7 +340,7 @@ SCENARIOS: dict[str, tuple[Scenario, list[str]]] = {
     "registry/invalid": (
         two_sources(NOTE, primitives_registry_format_3),
         [
-            "kleisis|registry/invalid|path:.schema-resources/primitives/specs/schema-registry.yml"
+            "kleisis|registry/invalid|path:.kleisis/resources/primitives/specs/schema-registry.yml"
             "|/_schema"
         ],
     ),
@@ -365,7 +365,7 @@ SCENARIOS: dict[str, tuple[Scenario, list[str]]] = {
         two_sources(NOTE, primitives_contract_renamed),
         [
             "kleisis|contract/binding-mismatch"
-            "|path:.schema-resources/primitives/schemas/record.schema.yaml|/properties/_schema/const"
+            "|path:.kleisis/resources/primitives/schemas/record.schema.yaml|/properties/_schema/const"
         ],
     ),
     "contract/duplicate": (
@@ -423,7 +423,7 @@ SCENARIOS: dict[str, tuple[Scenario, list[str]]] = {
         two_sources(NOTE, note_mapped_to_text),
         [
             "kleisis|reference/identifier-mismatch"
-            f"|path:.schema-resources/primitives/schemas/text.schema.yaml|/$id|{NOTE}"
+            f"|path:.kleisis/resources/primitives/schemas/text.schema.yaml|/$id|{NOTE}"
         ],
     ),
     "reference/leaves-source": (
@@ -453,7 +453,7 @@ SCENARIOS: dict[str, tuple[Scenario, list[str]]] = {
         two_sources(NOTE, owned_label_differs),
         [
             "kleisis|resources/conflicting-bytes"
-            "|path:.schema-resources/primitives/schemas/label.schema.yaml|/$id"
+            "|path:.kleisis/resources/primitives/schemas/label.schema.yaml|/$id"
         ],
     ),
     "child/missing-dependency": (
@@ -499,7 +499,7 @@ def test_drift_of_each_output_yields_its_own_result(
 ) -> None:
     consumer = two_sources(NOTE)(tmp_path, monkeypatch)
     SchemaClosureService().materialize(consumer)
-    (consumer / ".schema-resources/shared/schemas/main.schema.yaml").write_text(
+    (consumer / ".kleisis/resources/shared/schemas/main.schema.yaml").write_text(
         "# drift\n", encoding="utf-8"
     )
     with (consumer / "specs/schema-registry.yml").open("a", encoding="utf-8") as registry:
@@ -510,7 +510,7 @@ def test_drift_of_each_output_yields_its_own_result(
     assert status == 1
     assert log_violations(log) == []
     assert identities(log) == [
-        "kleisis|drift/resources|path:.schema-resources/",
+        "kleisis|drift/resources|path:.kleisis/resources/",
         "kleisis|drift/registry|path:specs/schema-registry.yml",
     ]
     assert invocation(log) == {"executionSuccessful": True}
@@ -518,7 +518,7 @@ def test_drift_of_each_output_yields_its_own_result(
         result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
         for result in log["runs"][0]["results"]
     ]
-    assert uris == [".schema-resources/", "specs/schema-registry.yml"]
+    assert uris == [".kleisis/resources/", "specs/schema-registry.yml"]
 
 
 def test_absent_registry_is_drift(
@@ -722,7 +722,7 @@ def test_record_outside_the_root_is_a_usage_error(
     "text, locus",
     [
         ("exports: []\n", "/_schema"),
-        ("_schema: kleisis:schema-resources@2\n", "/_schema"),
+        ("_schema: kleisis:schema-resources@3\n", "/_schema"),
         ("format_version: 1\n", "/format_version"),
     ],
 )
@@ -741,7 +741,7 @@ def test_record_without_its_format_identifier_stops_with_status_2(
     assert log_violations(log) == []
     assert identities(log) == [f"kleisis|record/invalid|{RECORD}|{locus}"]
     assert run_main(["validate", "--root", str(root)]) == 2
-    assert "_schema: kleisis:schema-resources@1" in capsys.readouterr().err
+    assert "_schema: kleisis:schema-resources@2" in capsys.readouterr().err
 
 
 def test_every_scenario_rule_and_every_catalogued_rule_agree() -> None:
