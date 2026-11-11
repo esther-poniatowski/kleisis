@@ -20,6 +20,7 @@ from kleisis.domain.models import (
 )
 from kleisis.domain.registry import load_registry
 from kleisis.errors import DriftError, RecordError, ReferenceError, RegistryError
+from kleisis.infrastructure.filesystem import copy_tree
 from kleisis.infrastructure.publication import publish_pair
 from kleisis.infrastructure.sources import ExactSourceProvider
 
@@ -394,6 +395,105 @@ def test_failed_build_removes_staging_directory(tmp_path: Path) -> None:
         service.validate(root)
 
     assert not list(tmp_path.glob("kleisis-stage-*"))
+
+
+def _recording_mkdtemp(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
+    """Record the parent folder of each stage that a build creates."""
+    parents: list[Path] = []
+    original = tempfile.mkdtemp
+
+    def recording(*args: object, **kwargs: object) -> str:
+        parents.append(Path(str(kwargs["dir"])))
+        return original(*args, **kwargs)  # type: ignore[call-overload, no-any-return]
+
+    monkeypatch.setattr(tempfile, "mkdtemp", recording)
+    return parents
+
+
+def test_materialize_stages_in_the_state_folder(
+    tmp_path: Path, exact_source: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, commit = exact_source
+    consumer = tmp_path / "consumer"
+    make_consumer(consumer, commit)
+    parents = _recording_mkdtemp(monkeypatch)
+    service = SchemaClosureService(source_provider=CopySourceProvider(source))
+
+    service.materialize(consumer)
+
+    assert parents == [(consumer / ".kleisis").resolve()]
+    assert not list(tmp_path.glob("kleisis-stage-*"))
+    assert sorted(path.name for path in (consumer / ".kleisis").iterdir()) == ["resources"]
+    service.check(consumer)
+
+
+def test_a_failed_materialize_deletes_its_stage(tmp_path: Path) -> None:
+    root = tmp_path / "consumer"
+    make_consumer(root, "a" * 40)
+    service = SchemaClosureService(source_provider=FailingProvider())
+
+    with pytest.raises(RegistryError, match="planted acquisition failure"):
+        service.materialize(root)
+
+    assert not list(tmp_path.glob("kleisis-stage-*"))
+    assert not list((root / ".kleisis").glob("stage-*"))
+
+
+def test_a_stage_left_by_a_crash_neither_blocks_nor_enters_the_next_run(
+    tmp_path: Path, exact_source: tuple[Path, str]
+) -> None:
+    source, commit = exact_source
+    consumer = tmp_path / "consumer"
+    make_consumer(consumer, commit)
+    leftover = consumer / ".kleisis/stage-crashed1"
+    (leftover / "resources/shared/schemas").mkdir(parents=True)
+    (leftover / "resources/shared/schemas/stale.schema.yaml").write_text(
+        "stale: true\n", encoding="utf-8"
+    )
+    (leftover / "transaction.json").write_text('{"entries": []}\n', encoding="utf-8")
+    unrelated = consumer / ".kleisis/stage-crashed1.0.backup"
+    unrelated.mkdir()
+    service = SchemaClosureService(source_provider=CopySourceProvider(source))
+
+    service.materialize(consumer)
+
+    assert not leftover.exists()
+    assert unrelated.is_dir()
+    assert not (consumer / ".kleisis/resources/shared/schemas/stale.schema.yaml").exists()
+    service.check(consumer)
+
+
+def test_the_validation_copy_never_holds_the_state_folder(
+    tmp_path: Path, exact_source: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The candidate copy holds the owned schemas and the fresh resources, nothing else."""
+    source, commit = exact_source
+    consumer = tmp_path / "consumer"
+    make_consumer(consumer, commit)
+    (consumer / ".kleisis/resources/shared").mkdir(parents=True)
+    (consumer / ".kleisis/resources/shared/stale.schema.yaml").write_text(
+        "stale: true\n", encoding="utf-8"
+    )
+    copied: list[tuple[Path, Path]] = []
+    original = copy_tree
+
+    def recording(source_tree: Path, target: Path) -> None:
+        copied.append((source_tree, target))
+        original(source_tree, target)
+
+    monkeypatch.setattr("kleisis.application.service.copy_tree", recording)
+    service = SchemaClosureService(source_provider=CopySourceProvider(source))
+
+    service.materialize(consumer)
+
+    state = (consumer / ".kleisis").resolve()
+    for source_tree, target in copied:
+        stage = target.relative_to(state).parts[0]
+        assert stage.startswith("stage-")
+        assert source_tree == (consumer / "specs/schemas").resolve() or source_tree.is_relative_to(
+            state / stage
+        )
+    assert not (consumer / ".kleisis/resources/shared/stale.schema.yaml").exists()
 
 
 def test_check_does_not_stage_beside_consumer(

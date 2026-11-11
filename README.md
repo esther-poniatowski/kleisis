@@ -99,7 +99,7 @@ paths:
   resources: .kleisis/resources
 ```
 
-The state folder `state` holds what Kleisis alone reads: the resource directory by default, and the journal and backups of a publication while it runs. When the record sets `state` and omits `resources`, the resource directory is `<state>/resources`. A record that sets `resources` keeps that directory wherever the state folder lies.
+The state folder `state` holds what Kleisis alone reads: the resource directory by default, the stage of a materialization run, and the journal and backups of a publication while it runs. When the record sets `state` and omits `resources`, the resource directory is `<state>/resources`. A record that sets `resources` keeps that directory wherever the state folder lies.
 
 Keep the state folder and the resource directory disjoint from these source and control paths:
 
@@ -163,7 +163,7 @@ The materialization command writes two consumer outputs and one receipt, shown a
 | `.kleisis/resources/receipt.yml` | ignored | records each exact source and copied-file digest |
 | `specs/schema-registry.yml` | tracked | maps owned, selected external and imported child identifiers, and each absolute `$id`, to local paths |
 
-A consumer excludes the state folder `.kleisis/` from version control. During a publication, the state folder also holds the journal `transaction.json` and one backup of each output; a successful or rolled-back publication deletes both.
+A consumer excludes the state folder `.kleisis/` from version control. While the materialization command runs, the state folder also holds its stage `stage-<random>/`, and during the publication the journal `transaction.json` and one backup of each output. The command deletes all three when it ends, except after a failed rollback, which keeps the journal and the backups for a later run to recover. A stage left by a crash is deleted by the next materialization, after the recovery of any journal. The check and validation commands stage in the system temporary folder, and write nothing in the repository.
 
 The registry names each materialized file by its repository path. Therefore, a consumer whose record omits `paths.resources` obtains a different registry when it first materializes with format 2, since its files move from `.schema-resources/` to `.kleisis/resources/`. The former directory `.schema-resources/` is then no longer read or written, and can be deleted.
 

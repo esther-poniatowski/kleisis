@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import tempfile
 from collections.abc import Iterator, Sequence
@@ -52,6 +53,12 @@ from kleisis.infrastructure.publication import publish_pair, recover_transaction
 from kleisis.infrastructure.sources import ExactSourceProvider
 
 _RECEIPT = "receipt.yml"
+_STATE_STAGE_PREFIX = "stage-"
+"""The prefix of a stage in the state folder, which only Kleisis writes."""
+_STAGE_NAME = re.compile(rf"{re.escape(_STATE_STAGE_PREFIX)}[a-z0-9_]{{8}}")
+"""The name of a stage in the state folder: the prefix and the 8 characters of ``mkdtemp``."""
+_SHARED_STAGE_PREFIX = "kleisis-stage-"
+"""The prefix of a stage in a folder shared with other tools, such as the temporary folder."""
 _DEFAULT_RECORD = PurePosixPath("specs/schema-resources.yml")
 
 
@@ -74,6 +81,26 @@ class ConsumerClosure:
 
 def _paths_overlap(first: PurePosixPath, second: PurePosixPath) -> bool:
     return first == second or first in second.parents or second in first.parents
+
+
+def _remove_stale_stages(state: Path, resources_target: Path) -> None:
+    """Delete each stage that an interrupted run left in the state folder.
+
+    A run deletes its own stage when it ends, so a stage found before a build was left by a
+    crash. Recovery has already run, and no journal names a stage, so nothing reads it. Only a
+    folder named as ``tempfile.mkdtemp`` names a stage matches; a backup, whose name holds dots,
+    never does, and the resources folder is kept whatever its name.
+    """
+    if not state.is_dir():
+        return
+    for path in state.iterdir():
+        if (
+            _STAGE_NAME.fullmatch(path.name)
+            and path != resources_target
+            and path.is_dir()
+            and not path.is_symlink()
+        ):
+            shutil.rmtree(path)
 
 
 def _former_targets(root: Path, registry_target: Path) -> set[Path] | None:
@@ -182,7 +209,13 @@ class SchemaClosureService:
             raise
 
     def build(self, project_root: Path, staging_parent: Path | None = None) -> CandidateState:
-        """Build a complete candidate state without modifying the project."""
+        """Build a complete candidate state without modifying the published outputs.
+
+        The stage lies in the state folder, below the root as the outputs, so that publication
+        moves it by renames within one file system. ``staging_parent`` overrides that folder;
+        ``check`` and ``validate`` pass the system temporary folder, since they must not write
+        in the repository.
+        """
         root = project_root.resolve()
         record = self.load(root)
         owned_root = resolve_inside(
@@ -227,8 +260,13 @@ class SchemaClosureService:
                 ],
             )
 
-        parent = staging_parent or root.parent
-        stage = Path(tempfile.mkdtemp(prefix="kleisis-stage-", dir=parent))
+        if staging_parent is None:
+            parent = resolve_inside(root, record.paths.state, "paths.state")
+            parent.mkdir(parents=True, exist_ok=True)
+            prefix = _STATE_STAGE_PREFIX
+        else:
+            parent, prefix = staging_parent, _SHARED_STAGE_PREFIX
+        stage = Path(tempfile.mkdtemp(prefix=prefix, dir=parent))
         resources_stage = stage / "resources"
         work_root = stage / "sources"
         validation_root = stage / "validation"
@@ -415,6 +453,7 @@ class SchemaClosureService:
                 {resources_target, registry_target},
                 _former_targets(root, registry_target),
             )
+            _remove_stale_stages(state, resources_target)
             candidate = self.build(root)
             registry_candidate = candidate.resources.parent / "schema-registry.yml"
             registry_candidate.write_bytes(registry_bytes(candidate.registry))
