@@ -95,7 +95,7 @@ def _write_log(log: dict[str, Any], output: Path | None) -> None:
 def _root(parser: argparse.ArgumentParser, given: Path | None) -> Path:
     """Return the root named by ``--root``, by ``KLEISIS_ROOT`` or by the current folder.
 
-    Kleisis has no settings file of its own, so the root is never searched among the ancestors.
+    Kleisis has no configuration file of its own, so the root is never searched among the ancestors.
     A root that is not a folder is a usage error.
     """
     if given is None:

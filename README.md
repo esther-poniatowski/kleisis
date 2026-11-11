@@ -119,7 +119,7 @@ The three commands keep writes separate from checks:
 - The materialization command `kleisis materialize --root .` replaces both generated outputs. If either write fails, the command attempts to restore both outputs immediately. If the command cannot restore them, it retains the transaction record so a later run can recover them.
 - The check command `kleisis check --root .` rematerializes in an isolated directory and fails when either generated output differs.
 
-Each command works on one root, the consumer repository. The root is named by the option `-r`, `--root`, or else by the environment variable `KLEISIS_ROOT`, or else is the current folder. Kleisis reads no settings file of its own, so it never searches the ancestors of the current folder. A root that is not a folder is a usage error.
+Each command works on one root, the consumer repository. The root is named by the option `-r`, `--root`, or else by the environment variable `KLEISIS_ROOT`, or else is the current folder. Kleisis reads no configuration file of its own, so it never searches the ancestors of the current folder. A root that is not a folder is a usage error.
 
 Each command accepts the option `--record PATH` when the resource record does not lie at its default path `specs/schema-resources.yml` below the root. The path is read from the current folder, and must lie below the root.
 
