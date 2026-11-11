@@ -101,10 +101,39 @@ def test_empty_registry_serialization_round_trips(tmp_path: Path) -> None:
     path = tmp_path / "schema-registry.yml"
     path.write_bytes(registry_bytes(Registry(schemas={}, exports=())))
 
-    assert path.read_text(encoding="utf-8").endswith(
-        "schema_version: 2\nschemas: {}\nexports: []\nresources: {}\n"
-    )
+    assert path.read_text(encoding="utf-8").splitlines()[1:] == [
+        "_schema: kleisis:schema-registry@2",
+        "schemas: {}",
+        "exports: []",
+        "resources: {}",
+    ]
     assert load_registry(path) == Registry(schemas={}, exports=())
+
+
+def test_registry_declaring_its_format_is_read(tmp_path: Path) -> None:
+    path = tmp_path / "schema-registry.yml"
+    path.write_text(
+        "_schema: kleisis:schema-registry@2\nschemas: {}\nexports: []\n"
+        "resources:\n  urn:example:a: schemas/a.schema.yaml\n",
+        encoding="utf-8",
+    )
+
+    assert load_registry(path) == Registry(
+        schemas={}, resources={"urn:example:a": PurePosixPath("schemas/a.schema.yaml")}
+    )
+
+
+def test_legacy_version_two_registry_is_still_read(tmp_path: Path) -> None:
+    path = tmp_path / "schema-registry.yml"
+    path.write_text(
+        "schema_version: 2\nschemas: {}\nexports: []\n"
+        "resources:\n  urn:example:a: schemas/a.schema.yaml\n",
+        encoding="utf-8",
+    )
+
+    assert load_registry(path) == Registry(
+        schemas={}, resources={"urn:example:a": PurePosixPath("schemas/a.schema.yaml")}
+    )
 
 
 def test_version_one_registry_is_still_read(tmp_path: Path) -> None:
@@ -130,13 +159,26 @@ def test_version_one_registry_admits_no_resources(tmp_path: Path) -> None:
         load_registry(path)
 
 
-@pytest.mark.parametrize("version", ["3", "true", "'2'"])
-def test_registry_rejects_an_unsupported_version(tmp_path: Path, version: str) -> None:
+@pytest.mark.parametrize(
+    "header",
+    [
+        "",
+        "_schema: kleisis:schema-registry@3\n",
+        "_schema: kleisis:schema-resources@1\n",
+        "_schema: 2\n",
+        "_schema: kleisis:schema-registry@2\nschema_version: 2\n",
+        "schema_version: 3\n",
+        "schema_version: true\n",
+        "schema_version: '2'\n",
+    ],
+)
+def test_registry_rejects_an_unsupported_format(tmp_path: Path, header: str) -> None:
     path = tmp_path / "schema-registry.yml"
-    path.write_text(f"schema_version: {version}\nschemas: {{}}\n", encoding="utf-8")
+    path.write_text(f"{header}schemas: {{}}\nexports: []\n", encoding="utf-8")
 
-    with pytest.raises(RegistryError, match="schema_version 1 or 2"):
+    with pytest.raises(RegistryError, match="_schema: kleisis:schema-registry@2") as caught:
         load_registry(path)
+    assert caught.value.findings[0].locus in {"/_schema", "/schema_version"}
 
 
 def test_version_two_registry_round_trips_resources(tmp_path: Path) -> None:

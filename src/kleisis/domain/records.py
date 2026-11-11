@@ -22,8 +22,11 @@ from kleisis.domain.models import (
     SchemaConvention,
     safe_relative_path,
 )
-from kleisis.errors import RecordError
+from kleisis.errors import RecordError, RecordFormatError
 from kleisis.findings import RECORD_UNREADABLE, field_pointer, pointer
+
+RECORD_FORMAT = "kleisis:schema-resources@1"
+"""The format identifier that a resource record declares in its first key ``_schema``."""
 
 _FULL_COMMIT = re.compile(r"[0-9a-f]{40}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -99,15 +102,32 @@ def load_resource_record(path: Path) -> ResourceRecord:
         raise
 
 
+def _check_format(root: dict[str, Any]) -> None:
+    """Require the record to declare ``_schema: kleisis:schema-resources@1``, without alias."""
+    expected = f"write _schema: {RECORD_FORMAT} as the first key"
+    if "format_version" in root:
+        raise RecordFormatError(
+            f"the key format_version is retired; {expected}", locus=pointer("format_version")
+        )
+    if "_schema" not in root:
+        raise RecordFormatError(
+            f"the record declares no _schema; {expected}", locus=pointer("_schema")
+        )
+    if root["_schema"] != RECORD_FORMAT:
+        raise RecordFormatError(
+            f"the record declares _schema {root['_schema']!r}; {expected}",
+            locus=pointer("_schema"),
+        )
+
+
 def _resource_record(raw: object) -> ResourceRecord:
     root = _mapping(raw, "resource record")
+    _check_format(root)
     _keys(
         root,
-        {"format_version", "paths", "schemas", "exports", "dependencies", "projects"},
+        {"_schema", "paths", "schemas", "exports", "dependencies", "projects"},
         "record",
     )
-    if root.get("format_version") != 1:
-        raise RecordError("format_version must equal 1", locus=pointer("format_version"))
 
     raw_paths = _mapping(root.get("paths", {}), "paths")
     _keys(raw_paths, {"owned_schemas", "registry", "resources"}, "paths")

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from kleisis.domain.records import load_resource_record
-from kleisis.errors import RecordError
+from kleisis.errors import RecordError, RecordFormatError
 
 
 def write_record(tmp_path: Path, body: str) -> Path:
@@ -16,20 +16,40 @@ def write_record(tmp_path: Path, body: str) -> Path:
 
 
 def test_defaults_are_conventional_repository_paths(tmp_path: Path) -> None:
-    record = load_resource_record(write_record(tmp_path, "format_version: 1\n"))
+    record = load_resource_record(write_record(tmp_path, "_schema: kleisis:schema-resources@1\n"))
 
     assert record.paths.owned_schemas.as_posix() == "specs/schemas"
     assert record.paths.registry.as_posix() == "specs/schema-registry.yml"
     assert record.paths.resources.as_posix() == ".schema-resources"
     assert record.schemas.suffixes == (".schema.yaml", ".schema.yml", ".schema.json")
     assert record.schemas.binding == "_schema"
+    assert record.format_version == 1
+
+
+@pytest.mark.parametrize(
+    "body, locus",
+    [
+        ("exports: []\n", "/_schema"),
+        ("_schema: kleisis:schema-resources@2\n", "/_schema"),
+        ("_schema: kleisis:schema-registry@2\n", "/_schema"),
+        ("format_version: 1\n", "/format_version"),
+        ("_schema: kleisis:schema-resources@1\nformat_version: 1\n", "/format_version"),
+    ],
+)
+def test_a_record_without_its_format_identifier_is_rejected(
+    tmp_path: Path, body: str, locus: str
+) -> None:
+    with pytest.raises(RecordFormatError, match="_schema: kleisis:schema-resources@1") as caught:
+        load_resource_record(write_record(tmp_path, body))
+    assert caught.value.exit_status == 2
+    assert caught.value.findings[0].locus == locus
 
 
 def test_the_schema_convention_is_read_from_the_record(tmp_path: Path) -> None:
     record = load_resource_record(
         write_record(
             tmp_path,
-            """format_version: 1
+            """_schema: kleisis:schema-resources@1
 schemas:
   suffixes: [.contract.yml]
   binding: $contract
@@ -53,7 +73,7 @@ dependencies:
 
 def test_a_partial_schema_convention_keeps_the_other_default(tmp_path: Path) -> None:
     record = load_resource_record(
-        write_record(tmp_path, "format_version: 1\nschemas:\n  binding: kind\n")
+        write_record(tmp_path, "_schema: kleisis:schema-resources@1\nschemas:\n  binding: kind\n")
     )
 
     assert record.schemas.suffixes == (".schema.yaml", ".schema.yml", ".schema.json")
@@ -63,16 +83,25 @@ def test_a_partial_schema_convention_keeps_the_other_default(tmp_path: Path) -> 
 @pytest.mark.parametrize(
     "body, message",
     [
-        ("format_version: 1\nextra: true\n", "unknown fields"),
-        ("format_version: 1\nschemas:\n  pattern: x\n", "unknown fields"),
-        ("format_version: 1\nschemas:\n  suffixes: []\n", "must not be empty"),
-        ("format_version: 1\nschemas:\n  suffixes: [.yml, .yml]\n", "must be unique"),
-        ("format_version: 1\nschemas:\n  suffixes: [schema.yml]\n", "open with a dot"),
-        ("format_version: 1\nschemas:\n  suffixes: [.a/b.yml]\n", "open with a dot"),
-        ("format_version: 1\nschemas:\n  binding: a/b\n", "property name"),
-        ("format_version: 1\nschemas:\n  binding: ''\n", "non-empty string"),
+        ("_schema: kleisis:schema-resources@1\nextra: true\n", "unknown fields"),
+        ("_schema: kleisis:schema-resources@1\nschemas:\n  pattern: x\n", "unknown fields"),
+        ("_schema: kleisis:schema-resources@1\nschemas:\n  suffixes: []\n", "must not be empty"),
         (
-            """format_version: 1
+            "_schema: kleisis:schema-resources@1\nschemas:\n  suffixes: [.yml, .yml]\n",
+            "must be unique",
+        ),
+        (
+            "_schema: kleisis:schema-resources@1\nschemas:\n  suffixes: [schema.yml]\n",
+            "open with a dot",
+        ),
+        (
+            "_schema: kleisis:schema-resources@1\nschemas:\n  suffixes: [.a/b.yml]\n",
+            "open with a dot",
+        ),
+        ("_schema: kleisis:schema-resources@1\nschemas:\n  binding: a/b\n", "property name"),
+        ("_schema: kleisis:schema-resources@1\nschemas:\n  binding: ''\n", "non-empty string"),
+        (
+            """_schema: kleisis:schema-resources@1
 dependencies:
   - id: shared
     registry: specs/schema-registry.yml
@@ -85,14 +114,14 @@ dependencies:
             "full lowercase Git commit",
         ),
         (
-            """format_version: 1
+            """_schema: kleisis:schema-resources@1
 paths:
   owned_schemas: ../schemas
 """,
             "must stay inside",
         ),
         (
-            """format_version: 1
+            """_schema: kleisis:schema-resources@1
 dependencies:
   - id: shared
     registry: specs/schema-registry.yml
@@ -106,7 +135,7 @@ dependencies:
             "must be non-empty when present",
         ),
         (
-            """format_version: 1
+            """_schema: kleisis:schema-resources@1
 dependencies:
   - id: shared
     registry: specs/schema-registry.yml
@@ -120,7 +149,7 @@ dependencies:
             "path order",
         ),
         (
-            """format_version: 1
+            """_schema: kleisis:schema-resources@1
 dependencies:
   - id: shared
     registry: specs/schema-registry.yml
@@ -142,14 +171,19 @@ def test_invalid_records_are_rejected(tmp_path: Path, body: str, message: str) -
 
 def test_duplicate_yaml_keys_are_rejected(tmp_path: Path) -> None:
     with pytest.raises(RecordError, match="duplicate key"):
-        load_resource_record(write_record(tmp_path, "format_version: 1\nformat_version: 1\n"))
+        load_resource_record(
+            write_record(
+                tmp_path,
+                "_schema: kleisis:schema-resources@1\n_schema: kleisis:schema-resources@1\n",
+            )
+        )
 
 
 def test_git_source_records_credential_and_archive_roots(tmp_path: Path) -> None:
     record = load_resource_record(
         write_record(
             tmp_path,
-            """format_version: 1
+            """_schema: kleisis:schema-resources@1
 dependencies:
   - id: private-source
     source:
@@ -180,7 +214,7 @@ def test_dependency_may_select_no_contract(tmp_path: Path, contracts: str) -> No
     record = load_resource_record(
         write_record(
             tmp_path,
-            f"""format_version: 1
+            f"""_schema: kleisis:schema-resources@1
 dependencies:
   - id: primitives
     source:
@@ -200,7 +234,7 @@ def test_dependency_contracts_must_be_unique(tmp_path: Path) -> None:
         load_resource_record(
             write_record(
                 tmp_path,
-                """format_version: 1
+                """_schema: kleisis:schema-resources@1
 dependencies:
   - id: shared
     source:

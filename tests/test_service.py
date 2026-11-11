@@ -22,6 +22,10 @@ from kleisis.errors import DriftError, ReferenceError, RegistryError
 from kleisis.infrastructure.publication import publish_pair
 from kleisis.infrastructure.sources import ExactSourceProvider
 
+RECORD_MARKER = "_schema: kleisis:schema-resources@1\n"
+REGISTRY_MARKER = "_schema: kleisis:schema-registry@2"
+RECEIPT_MARKER = "_schema: kleisis:receipt@1"
+
 
 def make_consumer(root: Path, commit: str) -> None:
     """Create a consumer that owns one schema and selects one exact dependency."""
@@ -31,7 +35,7 @@ def make_consumer(root: Path, commit: str) -> None:
         concrete_schema("consumer:owned@1"), encoding="utf-8"
     )
     (root / "specs/schema-resources.yml").write_text(
-        f"""format_version: 1
+        f"""_schema: kleisis:schema-resources@1
 exports:
   - consumer:owned@1
 dependencies:
@@ -185,7 +189,7 @@ def test_resource_path_cannot_overlap_sources(tmp_path: Path) -> None:
     root = tmp_path / "consumer"
     (root / "specs/schemas").mkdir(parents=True)
     (root / "specs/schema-resources.yml").write_text(
-        """format_version: 1
+        """_schema: kleisis:schema-resources@1
 paths:
   resources: specs
 """,
@@ -222,7 +226,7 @@ def test_exported_schema_closure_must_be_present(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     (root / "specs/schema-resources.yml").write_text(
-        "format_version: 1\nexports: [consumer:owned@1]\n", encoding="utf-8"
+        "_schema: kleisis:schema-resources@1\nexports: [consumer:owned@1]\n", encoding="utf-8"
     )
 
     with pytest.raises(ReferenceError, match="not a regular source file"):
@@ -240,7 +244,7 @@ def test_every_owned_contract_must_be_exported(tmp_path: Path) -> None:
         concrete_schema("consumer:hidden@1"), encoding="utf-8"
     )
     (root / "specs/schema-resources.yml").write_text(
-        "format_version: 1\nexports: [consumer:exported@1]\n", encoding="utf-8"
+        "_schema: kleisis:schema-resources@1\nexports: [consumer:exported@1]\n", encoding="utf-8"
     )
 
     with pytest.raises(RegistryError, match="owned contracts are absent from exports"):
@@ -255,7 +259,7 @@ def test_the_record_convention_selects_the_owned_contracts(tmp_path: Path) -> No
         "required: [kind]\nproperties:\n  kind: {const: consumer:record@1}\n", encoding="utf-8"
     )
     (root / "specs/schema-resources.yml").write_text(
-        "format_version: 1\n"
+        "_schema: kleisis:schema-resources@1\n"
         "schemas: {suffixes: [.contract.yml], binding: kind}\n"
         "exports: [consumer:record@1]\n",
         encoding="utf-8",
@@ -355,7 +359,7 @@ def test_composite_registry_imports_child_exports_and_checks_shared_bytes(
     shared = concrete_schema("shared:contract@1")
     (schemas / "shared.schema.yaml").write_text(shared, encoding="utf-8")
     (root / "specs/schema-resources.yml").write_text(
-        """format_version: 1
+        """_schema: kleisis:schema-resources@1
 exports: [parent:owned@1, shared:contract@1]
 projects:
   - path: projects/child
@@ -395,7 +399,7 @@ def test_composite_registry_rejects_missing_child_export_closure(tmp_path: Path)
     schemas.mkdir(parents=True)
     (schemas / "parent.schema.yaml").write_text(concrete_schema("parent:owned@1"), encoding="utf-8")
     (root / "specs/schema-resources.yml").write_text(
-        """format_version: 1
+        """_schema: kleisis:schema-resources@1
 exports: [parent:owned@1]
 projects:
   - path: projects/child
@@ -462,7 +466,7 @@ def make_two_sources(tmp_path: Path, owned_reference: str) -> tuple[Path, Mapped
             "schemas/text.schema.yaml": "type: string\n",
             "schemas/note.schema.yaml": f"$id: {NOTE}\ntype: string\n",
             "schemas/record.schema.yaml": concrete_schema("primitives:record@1", reference=LABEL),
-            "specs/schema-registry.yml": f"""schema_version: 2
+            "specs/schema-registry.yml": f"""_schema: kleisis:schema-registry@2
 schemas:
   primitives:record@1: schemas/record.schema.yaml
 exports: [primitives:record@1]
@@ -492,7 +496,7 @@ exports: [shared:main@1]
             "specs/schemas/owned.schema.yaml": concrete_schema(
                 "consumer:owned@1", reference=owned_reference
             ),
-            "specs/schema-resources.yml": f"""format_version: 1
+            "specs/schema-resources.yml": f"""_schema: kleisis:schema-resources@1
 exports: [consumer:owned@1]
 dependencies:
   - id: shared
@@ -530,10 +534,108 @@ def test_closure_spans_two_sources_through_absolute_identifiers(tmp_path: Path) 
         LABEL: ".schema-resources/primitives/schemas/label.schema.yaml",
         NOTE: ".schema-resources/primitives/schemas/note.schema.yaml",
     }
-    assert "schema_version: 2\n" in (consumer / "specs/schema-registry.yml").read_text(
-        encoding="utf-8"
-    )
+    assert (consumer / "specs/schema-registry.yml").read_text(encoding="utf-8").splitlines()[
+        1
+    ] == REGISTRY_MARKER
     service.check(consumer)
+
+
+def test_receipt_declares_its_format_first(tmp_path: Path) -> None:
+    consumer, provider = make_two_sources(tmp_path, NOTE)
+
+    SchemaClosureService(source_provider=provider).materialize(consumer)
+
+    lines = (consumer / ".schema-resources/receipt.yml").read_text(encoding="utf-8").splitlines()
+    assert lines[0] == RECEIPT_MARKER
+    assert not any(line.startswith("format_version") for line in lines)
+
+
+@pytest.mark.parametrize(
+    "header",
+    ["format_version: 1", "_schema: kleisis:receipt@2", ""],
+    ids=["old-key", "other-identifier", "absent"],
+)
+def test_receipt_in_another_format_is_stale(tmp_path: Path, header: str) -> None:
+    consumer, provider = make_two_sources(tmp_path, NOTE)
+    service = SchemaClosureService(source_provider=provider)
+    service.materialize(consumer)
+    receipt = consumer / ".schema-resources/receipt.yml"
+    lines = receipt.read_text(encoding="utf-8").splitlines(keepends=True)
+    receipt.write_text("".join([f"{header}\n" if header else "", *lines[1:]]), encoding="utf-8")
+
+    with pytest.raises(DriftError, match="resources differ") as caught:
+        service.check(consumer)
+    assert [finding.rule.id for finding in caught.value.findings] == ["drift/resources"]
+    service.materialize(consumer)
+    assert receipt.read_text(encoding="utf-8").splitlines()[0] == RECEIPT_MARKER
+    service.check(consumer)
+
+
+def test_legacy_own_registry_is_drift_and_is_rewritten(tmp_path: Path) -> None:
+    consumer, provider = make_two_sources(tmp_path, NOTE)
+    service = SchemaClosureService(source_provider=provider)
+    service.materialize(consumer)
+    registry = consumer / "specs/schema-registry.yml"
+    current = registry.read_text(encoding="utf-8")
+    registry.write_text(current.replace(REGISTRY_MARKER, "schema_version: 2"), encoding="utf-8")
+
+    with pytest.raises(DriftError, match="registry differs") as caught:
+        service.check(consumer)
+    assert [finding.rule.id for finding in caught.value.findings] == ["drift/registry"]
+    service.materialize(consumer)
+    assert registry.read_text(encoding="utf-8") == current
+    service.check(consumer)
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        f"{REGISTRY_MARKER}\nresources: {{}}\n",
+        "schema_version: 2\nresources: {}\n",
+        "schema_version: 1\n",
+    ],
+    ids=["current", "legacy-2", "legacy-1"],
+)
+def test_dependency_registry_is_read_in_each_accepted_form(tmp_path: Path, header: str) -> None:
+    consumer, provider = make_two_sources(tmp_path, NOTE)
+    write_tree(
+        tmp_path / "shared",
+        {
+            "specs/schema-registry.yml": (
+                f"{header}schemas:\n  shared:main@1: schemas/main.schema.yaml\n"
+                "exports: [shared:main@1]\n"
+            )
+        },
+    )
+    service = SchemaClosureService(source_provider=provider)
+
+    service.materialize(consumer)
+
+    assert "shared:main@1" in load_registry(consumer / "specs/schema-registry.yml").schemas
+    service.check(consumer)
+
+
+@pytest.mark.parametrize(
+    "header",
+    ["_schema: kleisis:schema-registry@3\n", "", f"{REGISTRY_MARKER}\nschema_version: 2\n"],
+    ids=["other-identifier", "absent", "both-keys"],
+)
+def test_dependency_registry_without_its_format_identifier_fails(
+    tmp_path: Path, header: str
+) -> None:
+    consumer, provider = make_two_sources(tmp_path, NOTE)
+    write_tree(
+        tmp_path / "shared",
+        {
+            "specs/schema-registry.yml": (
+                f"{header}schemas:\n  shared:main@1: schemas/main.schema.yaml\n"
+                "exports: [shared:main@1]\nresources: {}\n"
+            )
+        },
+    )
+
+    with pytest.raises(RegistryError, match="write _schema: kleisis:schema-registry@2"):
+        SchemaClosureService(source_provider=provider).validate(consumer)
 
 
 def test_unknown_absolute_identifier_names_uri_and_referring_file(tmp_path: Path) -> None:
@@ -552,7 +654,7 @@ def test_dependencies_mapping_one_identifier_to_different_bytes_fail(tmp_path: P
         tmp_path / "shared",
         {
             "schemas/note.schema.yaml": f"$id: {NOTE}\ntype: integer\n",
-            "specs/schema-registry.yml": f"""schema_version: 2
+            "specs/schema-registry.yml": f"""_schema: kleisis:schema-registry@2
 schemas:
   shared:main@1: schemas/main.schema.yaml
 exports: [shared:main@1]
@@ -581,7 +683,7 @@ def make_parent_with_resource_child(tmp_path: Path, child_label: str) -> Path:
         {
             "specs/schemas/parent.schema.yaml": concrete_schema("parent:owned@1"),
             "specs/schemas/label.schema.yaml": f"$id: {LABEL}\ntype: string\n",
-            "specs/schema-resources.yml": """format_version: 1
+            "specs/schema-resources.yml": """_schema: kleisis:schema-resources@1
 exports: [parent:owned@1]
 projects:
   - path: projects/child
@@ -594,7 +696,7 @@ projects:
             "specs/schemas/child.schema.yaml": concrete_schema("child:owned@1", reference=NOTE),
             ".schema-resources/tool/note.schema.yaml": f"$id: {NOTE}\ntype: string\n",
             ".schema-resources/tool/label.schema.yaml": child_label,
-            "specs/schema-registry.yml": f"""schema_version: 2
+            "specs/schema-registry.yml": f"""_schema: kleisis:schema-registry@2
 schemas:
   child:owned@1: specs/schemas/child.schema.yaml
 exports: [child:owned@1]
@@ -628,15 +730,18 @@ def test_composite_registry_rejects_child_resource_with_different_bytes(tmp_path
 
 
 def make_resource_only(
-    tmp_path: Path, owned_reference: str | None, registry_version: int = 2
+    tmp_path: Path, owned_reference: str | None, registry_marker: str = REGISTRY_MARKER
 ) -> tuple[Path, MappedSourceProvider]:
     """Create a consumer whose dependency ``primitives`` selects no contract.
 
-    The registry of ``primitives`` maps one base resource when its version is 2 or later. The
-    consumer refers to ``owned_reference``, or to nothing.
+    The registry of ``primitives`` declares its format by ``registry_marker``, and maps one base
+    resource unless that marker is the legacy ``schema_version: 1``. The consumer refers to
+    ``owned_reference``, or to nothing.
     """
     resources = (
-        f"resources:\n  {LABEL}: schemas/label.schema.yaml\n" if registry_version > 1 else ""
+        ""
+        if registry_marker == "schema_version: 1"
+        else f"resources:\n  {LABEL}: schemas/label.schema.yaml\n"
     )
     primitives = write_tree(
         tmp_path / "primitives",
@@ -646,7 +751,7 @@ def make_resource_only(
             ),
             "schemas/text.schema.yaml": "type: string\n",
             "specs/schema-registry.yml": (
-                f"schema_version: {registry_version}\nschemas: {{}}\nexports: []\n{resources}"
+                f"{registry_marker}\nschemas: {{}}\nexports: []\n{resources}"
             ),
         },
     )
@@ -656,7 +761,7 @@ def make_resource_only(
             "specs/schemas/owned.schema.yaml": concrete_schema(
                 "consumer:owned@1", reference=owned_reference
             ),
-            "specs/schema-resources.yml": f"""format_version: 1
+            "specs/schema-resources.yml": f"""_schema: kleisis:schema-resources@1
 exports: [consumer:owned@1]
 dependencies:
   - id: primitives
@@ -687,7 +792,7 @@ def test_resource_only_dependency_serves_an_absolute_reference(tmp_path: Path) -
 
 
 def test_resource_only_dependency_with_version_1_registry_fails(tmp_path: Path) -> None:
-    consumer, provider = make_resource_only(tmp_path, LABEL, registry_version=1)
+    consumer, provider = make_resource_only(tmp_path, LABEL, registry_marker="schema_version: 1")
 
     with pytest.raises(
         RegistryError, match="dependency primitives selects no contract, and its registry of"
@@ -721,7 +826,7 @@ def make_rooted_consumer(tmp_path: Path, export_reference: str | None) -> Path:
             ),
             "specs/schemas/defs.schema.yaml": "type: string\n",
             "specs/schemas/support.schema.yaml": f"$ref: {ROOTED}\n",
-            "specs/schema-resources.yml": "format_version: 1\nexports: [consumer:owned@1]\n",
+            "specs/schema-resources.yml": f"{RECORD_MARKER}exports: [consumer:owned@1]\n",
         },
     )
 
@@ -762,7 +867,7 @@ def test_vault_rooted_reference_in_a_child_export_closure_fails(tmp_path: Path) 
         tmp_path / "parent",
         {
             "specs/schemas/parent.schema.yaml": concrete_schema("parent:owned@1"),
-            "specs/schema-resources.yml": """format_version: 1
+            "specs/schema-resources.yml": """_schema: kleisis:schema-resources@1
 exports: [parent:owned@1]
 projects:
   - path: projects/child
@@ -774,7 +879,7 @@ projects:
         {
             "specs/schemas/child.schema.yaml": concrete_schema("child:owned@1", reference=ROOTED),
             "specs/schemas/defs.schema.yaml": "type: string\n",
-            "specs/schema-registry.yml": """schema_version: 2
+            "specs/schema-registry.yml": """_schema: kleisis:schema-registry@2
 schemas:
   child:owned@1: specs/schemas/child.schema.yaml
 exports: [child:owned@1]

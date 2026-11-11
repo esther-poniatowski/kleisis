@@ -27,6 +27,8 @@ class SchemaClosureError(Exception):
     """
 
     default_rule: ClassVar[Rule] = REGISTRY_INVALID
+    exit_status: ClassVar[int] = 1
+    """The exit status of a command that this failure stops."""
 
     def __init__(
         self,
@@ -74,6 +76,15 @@ class RecordError(SchemaClosureError):
     """A resource record violates its declared structure."""
 
     default_rule = RECORD_INVALID
+
+
+class RecordFormatError(RecordError):
+    """A resource record declares no format, or a format other than the one Kleisis reads.
+
+    The record is the configuration of the command, so the command stops with status 2.
+    """
+
+    exit_status = 2
 
 
 class SourceError(SchemaClosureError):

@@ -133,7 +133,11 @@ class Project:
 
 @dataclass(frozen=True)
 class ResourceRecord:
-    """The complete source declaration for one consumer repository."""
+    """The complete source declaration for one consumer repository.
+
+    ``format_version`` holds the major version of the format ``kleisis:schema-resources``
+    that the record declares in its key ``_schema``.
+    """
 
     format_version: int
     paths: Paths
@@ -147,8 +151,9 @@ class ResourceRecord:
 class Registry:
     """A deterministic registry of logical identifiers and absolute schema identifiers.
 
-    ``schema_version`` records the format version read; the serializer always writes the
-    current version.
+    ``schema_version`` records the layout read: 1 for a legacy registry without ``resources``,
+    2 for a registry declaring ``_schema: kleisis:schema-registry@2`` or the legacy
+    ``schema_version: 2``. The serializer always writes the current format.
     """
 
     schemas: dict[str, PurePosixPath]

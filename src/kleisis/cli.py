@@ -152,4 +152,5 @@ def main(arguments: list[str] | None = None) -> None:
     if options.format == "sarif":
         _write_log(sarif_log(findings, __version__, stopped), options.output)
     if failure is not None:
-        raise SystemExit(1) from failure
+        status = failure.exit_status if isinstance(failure, SchemaClosureError) else 1
+        raise SystemExit(status) from failure

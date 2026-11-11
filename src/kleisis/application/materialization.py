@@ -49,9 +49,17 @@ def _source_facts(source: GitSource | ArtifactSource) -> dict[str, object]:
     }
 
 
+RECEIPT_FORMAT = "kleisis:receipt@1"
+"""The format identifier that a receipt declares in its first key ``_schema``."""
+
+
 def receipt_bytes(dependencies: list[MaterializedDependency], resources: Path) -> bytes:
-    """Serialize exact source facts and copied-file digests."""
-    value: dict[str, Any] = {"format_version": 1, "dependencies": []}
+    """Serialize exact source facts and copied-file digests, with ``_schema`` first.
+
+    No command reads a receipt back: ``check`` compares it by bytes with a fresh build, so a
+    receipt in another format reports drift, and ``materialize`` rewrites it.
+    """
+    value: dict[str, Any] = {"_schema": RECEIPT_FORMAT, "dependencies": []}
     for dependency in sorted(dependencies, key=lambda item: item.id):
         files = [
             {"path": path.as_posix(), "sha256": digest(resources / Path(path))}

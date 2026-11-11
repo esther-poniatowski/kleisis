@@ -35,7 +35,7 @@ The resource record governs four inputs:
 This record template uses the conventional paths and selects one contract from an exact Git state. Replace the example commit with the required source commit:
 
 ```yaml
-format_version: 1
+_schema: kleisis:schema-resources@1
 
 exports:
   - mixture:question@1
@@ -53,6 +53,8 @@ dependencies:
     contracts:
       - geonexus:glossary@1
 ```
+
+The record declares its format in its first key, `_schema: kleisis:schema-resources@1`. A record without this key, with another value, or with the retired key `format_version` stops each command with status 2, and the message names the value to write.
 
 Each dependency identifier uses lower kebab-case. Each Git source uses a web address that starts with `https://`, contains no authentication data and names a full lowercase commit. Instead, an artifact source declares a web address that starts with `https://` and contains no authentication data. The artifact source also declares its source commit and a 256-bit digest.
 
@@ -123,7 +125,7 @@ Each command works on one root, the consumer repository. The root is named by th
 
 Each command accepts the option `--record PATH` when the resource record does not lie at its default path `specs/schema-resources.yml` below the root. The path is read from the current folder, and must lie below the root.
 
-The exit status is 0 on success, 1 when the build, the validation or the check fails, and 2 on a usage error or when the SARIF log cannot be written. The option `-v`, `--version` prints the version.
+The exit status is 0 on success, 1 when the build, the validation or the check fails, and 2 on a usage error, on a resource record that does not declare its format, or when the SARIF log cannot be written. The option `-v`, `--version` prints the version.
 
 The commands `validate` and `check` also accept the option `--format sarif`. The command then writes a SARIF 2.1.0 log on standard output, in the findings profile of the gate Elenchos. The build stops at its first failure, so the log holds one result for that failure, or one per item when the failure lists several; `check` adds one result per generated output that differs. A successful run yields a log without result. The line on standard error and the exit status stay unchanged.
 
@@ -140,7 +142,7 @@ No command fetches a URI. Each command fails, naming the URI and the referring f
 - no file of the referring source and no declared dependency maps an absolute `$ref`;
 - two dependencies map one absolute `$ref` to different bytes.
 
-Each command also fails, naming the dependency, when a dependency selects no contract and either its registry is of version 1 or no reference of the closure reaches any of its resources. Finally, each command fails, naming the file and the reference, when a file of an export closure or a materialized file holds a vault-rooted `$ref`.
+Each command also fails, naming the dependency, when a dependency selects no contract and either its registry is a legacy registry of `schema_version: 1` or no reference of the closure reaches any of its resources. Finally, each command fails, naming the file and the reference, when a file of an export closure or a materialized file holds a vault-rooted `$ref`.
 
 These commands validate the closure through Kleisis's resolver. The separate consumer qualification gate must still prove that the released Ekphrasis bundle loads every exported schema.
 
@@ -154,13 +156,15 @@ The materialization command writes two consumer outputs and one receipt:
 | `.schema-resources/receipt.yml` | ignored | records each exact source and copied-file digest |
 | `specs/schema-registry.yml` | tracked | maps owned, selected external and imported child identifiers, and each absolute `$id`, to local paths |
 
-The generated registry declares `schema_version: 2` and holds three keys:
+The receipt declares `_schema: kleisis:receipt@1` as its first key. No command reads a receipt back: `check` compares it by bytes with a fresh build, so a receipt in another format reports drift until `materialize` rewrites it.
+
+The generated registry declares `_schema: kleisis:schema-registry@2` as its first key, and holds three further keys:
 
 - `schemas` maps each contract identifier to its file, including a dependency identifier outside the export set;
 - `exports` lists only project-owned identifiers;
 - `resources` maps each absolute `$id` string, exactly as written in a schema file, to the repository-relative path of that file.
 
-The key `resources` covers every owned or materialized schema file whose root declares an absolute `$id`, which starts with a URI scheme. Two files may declare one `$id` only with identical bytes. Kleisis still reads a registry of version 1, which has no `resources` key, in a dependency or a child repository. The [closure across sources](docs/adr/closure-across-sources.md) records this format.
+The key `resources` covers every owned or materialized schema file whose root declares an absolute `$id`, which starts with a URI scheme. Two files may declare one `$id` only with identical bytes. A consumer cannot regenerate the registry of a dependency or a child repository, so Kleisis also reads two legacy forms there: `schema_version: 1`, without the key `resources`, and `schema_version: 2`, with it. Any other value, both keys together, or neither key fails the command. A legacy registry of the consumer itself differs from a fresh build, so `check` reports it as drift and `materialize` rewrites it. The [closure across sources](docs/adr/closure-across-sources.md) records this format.
 
 An owned contract uses the root path `properties.<binding>.const` to state its identifier, where `<binding>` is the binding of the resource record, `_schema` by default. Its root `required` list must also name the binding. The resource record must export every contract with both entries. A file with neither entry remains an owned support schema. The support schema can still serve a `$ref`. A file with only one entry or an invalid value fails the command.
 

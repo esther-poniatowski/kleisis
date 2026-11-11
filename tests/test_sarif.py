@@ -13,6 +13,8 @@ from findings_profile import identities, log_violations
 from test_service import (
     LABEL,
     NOTE,
+    RECORD_MARKER,
+    REGISTRY_MARKER,
     ROOTED,
     make_consumer,
     make_resource_only,
@@ -138,7 +140,7 @@ def owned_tree(files: dict[str, str], exports: str = "[consumer:owned@1]") -> Sc
         return write_tree(
             tmp_path / "consumer",
             {
-                "specs/schema-resources.yml": f"format_version: 1\nexports: {exports}\n",
+                "specs/schema-resources.yml": f"{RECORD_MARKER}exports: {exports}\n",
                 **{f"specs/schemas/{name}": text for name, text in files.items()},
             },
         )
@@ -167,11 +169,11 @@ def two_sources(reference: str, edit: Callable[[Path, Path], None] | None = None
     return build
 
 
-def resource_only(reference: str | None, version: int = 2) -> Scenario:
+def resource_only(reference: str | None, marker: str = REGISTRY_MARKER) -> Scenario:
     """The consumer of ``make_resource_only``."""
 
     def build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-        consumer, provider = make_resource_only(tmp_path, reference, registry_version=version)
+        consumer, provider = make_resource_only(tmp_path, reference, registry_marker=marker)
         use_provider(monkeypatch, provider)
         return consumer
 
@@ -206,10 +208,12 @@ def replace_in(path: Path, old: str, new: str) -> None:
     path.write_text(text.replace(old, new), encoding="utf-8")
 
 
-def primitives_registry_version_3(tests: Path, consumer: Path) -> None:
+def primitives_registry_format_3(tests: Path, consumer: Path) -> None:
     del consumer
     replace_in(
-        tests / "primitives/specs/schema-registry.yml", "schema_version: 2", "schema_version: 3"
+        tests / "primitives/specs/schema-registry.yml",
+        REGISTRY_MARKER,
+        "_schema: kleisis:schema-registry@3",
     )
 
 
@@ -237,7 +241,7 @@ def note_mapped_twice(tests: Path, consumer: Path) -> None:
         tests / "shared",
         {
             "schemas/note.schema.yaml": f"$id: {NOTE}\ntype: integer\n",
-            "specs/schema-registry.yml": f"""schema_version: 2
+            "specs/schema-registry.yml": f"""_schema: kleisis:schema-registry@2
 schemas:
   shared:main@1: schemas/main.schema.yaml
 exports: [shared:main@1]
@@ -271,7 +275,7 @@ def child_shares_other_bytes(tests: Path, consumer: Path) -> None:
         {
             "specs/schemas/child.schema.yaml": concrete_schema("child:owned@1"),
             ".schema-resources/shared/schemas/main.schema.yaml": concrete_schema("shared:main@1"),
-            "specs/schema-registry.yml": """schema_version: 2
+            "specs/schema-registry.yml": """_schema: kleisis:schema-registry@2
 schemas:
   child:owned@1: specs/schemas/child.schema.yaml
   shared:main@1: .schema-resources/shared/schemas/main.schema.yaml
@@ -288,13 +292,13 @@ def child_with_missing_dependency(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         tmp_path / "parent",
         {
             "specs/schemas/parent.schema.yaml": concrete_schema("parent:owned@1"),
-            "specs/schema-resources.yml": """format_version: 1
+            "specs/schema-resources.yml": """_schema: kleisis:schema-resources@1
 exports: [parent:owned@1]
 projects:
   - path: projects/child
 """,
             "projects/child/specs/schemas/child.schema.yaml": concrete_schema("child:owned@1"),
-            "projects/child/specs/schema-registry.yml": """schema_version: 2
+            "projects/child/specs/schema-registry.yml": """_schema: kleisis:schema-registry@2
 schemas:
   child:owned@1: specs/schemas/child.schema.yaml
   tool:base@1: specs/schemas/base.schema.yaml
@@ -305,26 +309,26 @@ resources: {}
     )
 
 
-CONSUMER_RECORD = "format_version: 1\nexports: [consumer:owned@1]\n"
+CONSUMER_RECORD = "_schema: kleisis:schema-resources@1\nexports: [consumer:owned@1]\n"
 SCENARIOS: dict[str, tuple[Scenario, list[str]]] = {
     "record/unreadable": (
-        record_only("format_version: [\n"),
+        record_only("_schema: [\n"),
         [f"kleisis|record/unreadable|{RECORD}"],
     ),
     "record/invalid": (
-        record_only("format_version: 2\n"),
-        [f"kleisis|record/invalid|{RECORD}|/format_version"],
+        record_only(f"{RECORD_MARKER}exports: x\n"),
+        [f"kleisis|record/invalid|{RECORD}|/exports"],
     ),
     "record/path-overlap": (
-        record_only("format_version: 1\npaths:\n  resources: specs\n"),
+        record_only("_schema: kleisis:schema-resources@1\npaths:\n  resources: specs\n"),
         [f"kleisis|record/path-overlap|{RECORD}|/paths/resources|specs/schemas"],
     ),
     "path/escape": (
-        record_only("format_version: 1\npaths:\n  owned_schemas: ../outside\n"),
+        record_only("_schema: kleisis:schema-resources@1\npaths:\n  owned_schemas: ../outside\n"),
         [f"kleisis|path/escape|{RECORD}|/paths/owned_schemas"],
     ),
     "path/absent": (
-        record_only("format_version: 1\n", owned=False),
+        record_only("_schema: kleisis:schema-resources@1\n", owned=False),
         [f"kleisis|path/absent|{RECORD}|/paths/owned_schemas"],
     ),
     "source/unavailable": (
@@ -332,10 +336,10 @@ SCENARIOS: dict[str, tuple[Scenario, list[str]]] = {
         [f"kleisis|source/unavailable|{RECORD}|/dependencies|shared"],
     ),
     "registry/invalid": (
-        two_sources(NOTE, primitives_registry_version_3),
+        two_sources(NOTE, primitives_registry_format_3),
         [
             "kleisis|registry/invalid|path:.schema-resources/primitives/specs/schema-registry.yml"
-            "|/schema_version"
+            "|/_schema"
         ],
     ),
     "schema/unreadable": (
@@ -398,7 +402,7 @@ SCENARIOS: dict[str, tuple[Scenario, list[str]]] = {
         [f"kleisis|contract/unprovided|{RECORD}|/dependencies|shared:absent@1"],
     ),
     "dependency/no-resources": (
-        resource_only(LABEL, version=1),
+        resource_only(LABEL, marker="schema_version: 1"),
         [f"kleisis|dependency/no-resources|{RECORD}|/dependencies|primitives"],
     ),
     "dependency/unused": (
@@ -709,6 +713,32 @@ def test_record_outside_the_root_is_a_usage_error(
 
     assert run_main(["validate", "--root", str(root), "--record", str(outside)]) == 2
     assert "lies outside the root" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "text, locus",
+    [
+        ("exports: []\n", "/_schema"),
+        ("_schema: kleisis:schema-resources@2\n", "/_schema"),
+        ("format_version: 1\n", "/format_version"),
+    ],
+)
+def test_record_without_its_format_identifier_stops_with_status_2(
+    text: str,
+    locus: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = record_only(text)(tmp_path, monkeypatch)
+
+    status, log = run_sarif(capsys, "validate", root)
+
+    assert status == 2
+    assert log_violations(log) == []
+    assert identities(log) == [f"kleisis|record/invalid|{RECORD}|{locus}"]
+    assert run_main(["validate", "--root", str(root)]) == 2
+    assert "_schema: kleisis:schema-resources@1" in capsys.readouterr().err
 
 
 def test_every_scenario_rule_and_every_catalogued_rule_agree() -> None:
