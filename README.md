@@ -51,7 +51,7 @@ dependencies:
         - utils/schemas
     registry: specs/schema-registry.yml
     contracts:
-      - geonexus:glossary@1
+      - geonexus:project@1
 ```
 
 The record declares its format in its first key, `_schema: kleisis:schema-resources@1`. A record without this key, with another value, or with the retired key `format_version` stops each command with status 2, and the message names the value to write.
