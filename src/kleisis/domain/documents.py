@@ -8,9 +8,11 @@ from typing import Any
 
 import yaml
 
+MERGE_TAG = "tag:yaml.org,2002:merge"
+
 
 class UniqueKeyLoader(yaml.SafeLoader):
-    """A safe YAML loader that rejects duplicate mapping keys."""
+    """A safe YAML loader that rejects duplicate mapping keys and merge keys."""
 
 
 def _unique_mapping(
@@ -18,6 +20,16 @@ def _unique_mapping(
 ) -> dict[Any, Any]:
     mapping: dict[Any, Any] = {}
     for key_node, value_node in node.value:
+        if key_node.tag == MERGE_TAG:
+            # A merge key belongs to YAML 1.1: a YAML 1.2 reader takes `<<` as an ordinary key, so
+            # the document would state different keys to different readers.
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                "found a merge key `<<`, which a YAML 1.2 reader reads as an ordinary key; "
+                "write the merged keys out",
+                key_node.start_mark,
+            )
         key = loader.construct_object(key_node, deep=deep)
         if key in mapping:
             raise yaml.constructor.ConstructorError(
@@ -37,11 +49,12 @@ UniqueKeyLoader.add_constructor(
 
 
 def load_document(path: Path) -> Any:
-    """Load JSON strictly and YAML without duplicate mapping keys."""
-    text = path.read_text(encoding="utf-8")
+    """Load JSON strictly and YAML without duplicate mapping keys or merge keys."""
     if path.suffix.lower() == ".json":
-        value = json.loads(text)
+        value = json.loads(path.read_text(encoding="utf-8"))
     else:
-        value = yaml.load(text, Loader=UniqueKeyLoader)
+        # Reading from the open file lets each YAML error name the file in its position.
+        with path.open(encoding="utf-8") as stream:
+            value = yaml.load(stream, Loader=UniqueKeyLoader)
     json.dumps(value, allow_nan=False)
     return value

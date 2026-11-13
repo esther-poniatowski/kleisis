@@ -64,6 +64,20 @@ def test_json_schema_must_parse_as_json(tmp_path: Path) -> None:
         reference_closure(root, [entrypoint])
 
 
+def test_schema_with_a_merge_key_names_the_key_and_its_file(tmp_path: Path) -> None:
+    root = tmp_path / "source"
+    root.mkdir()
+    entrypoint = root / "root.schema.yaml"
+    entrypoint.write_text(
+        "x-base: &base {type: string}\nproperties:\n  a:\n    <<: *base\n", encoding="utf-8"
+    )
+
+    pattern = r"(?s)merge key `<<`.*root\.schema\.yaml\", line 4"
+    with pytest.raises(ReferenceError, match=pattern) as caught:
+        reference_closure(root, [entrypoint])
+    assert caught.value.findings[0].rule.id == "schema/unreadable"
+
+
 def test_uppercase_json_suffix_still_requires_json(tmp_path: Path) -> None:
     root = tmp_path / "source"
     root.mkdir()

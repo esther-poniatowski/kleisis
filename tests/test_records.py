@@ -202,6 +202,16 @@ def test_invalid_records_are_rejected(tmp_path: Path, body: str, message: str) -
         load_resource_record(write_record(tmp_path, body))
 
 
+def test_yaml_merge_keys_are_rejected(tmp_path: Path) -> None:
+    with pytest.raises(RecordError, match=r"(?s)merge key `<<`.*record\.yml\", line 4"):
+        load_resource_record(
+            write_record(
+                tmp_path,
+                "_schema: kleisis:schema-resources@2\nbase: &base {a: 1}\nother:\n  <<: *base\n",
+            )
+        )
+
+
 def test_duplicate_yaml_keys_are_rejected(tmp_path: Path) -> None:
     with pytest.raises(RecordError, match="duplicate key"):
         load_resource_record(
