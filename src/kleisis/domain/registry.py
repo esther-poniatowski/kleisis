@@ -265,7 +265,8 @@ def load_registry(path: Path) -> Registry:
         )
     resources: dict[str, PurePosixPath] = {}
     if version >= 2:
-        resources = _registry_paths(path, root.get("resources"), "resources")
+        # An absent map reads as an empty one, as the decision on tool roles states for readers.
+        resources = _registry_paths(path, root.get("resources", {}), "resources")
         relative = sorted(uri for uri in resources if not is_absolute_uri(uri))
         if relative:
             raise RegistryError(

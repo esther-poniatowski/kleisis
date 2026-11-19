@@ -177,7 +177,7 @@ The generated registry declares `_schema: kleisis:schema-registry@2` as its firs
 - `exports` lists only project-owned identifiers;
 - `resources` maps each absolute `$id` string, exactly as written in a schema file, to the repository-relative path of that file.
 
-The key `resources` covers every owned or materialized schema file whose root declares an absolute `$id`, which starts with a URI scheme. Two files may declare one `$id` only with identical bytes. A consumer cannot regenerate the registry of a dependency or a child repository, so Kleisis also reads two legacy forms there: `schema_version: 1`, without the key `resources`, and `schema_version: 2`, with it. Any other value, both keys together, or neither key fails the command. A legacy registry of the consumer itself differs from a fresh build, so `check` reports it as drift and `materialize` rewrites it. The [closure across sources](docs/adr/closure-across-sources.md) records this format.
+The key `resources` covers every owned or materialized schema file whose root declares an absolute `$id`, which starts with a URI scheme. Two files may declare one `$id` only with identical bytes. A consumer cannot regenerate the registry of a dependency or a child repository, so Kleisis also reads two legacy forms there: `schema_version: 1`, without the key `resources`, and `schema_version: 2`, with it. An absent `resources` reads as an empty map. Any other value, both keys together, or neither key fails the command. A legacy registry of the consumer itself differs from a fresh build, so `check` reports it as drift and `materialize` rewrites it. The [closure across sources](docs/adr/closure-across-sources.md) records this format. The [schema of the registry](specs/schemas/schema-registry.schema.json) publishes it under an absolute `$id`, and [its cases](specs/cases/registries.yml) fix the verdict of a reader on each form.
 
 An owned contract uses the root path `properties.<binding>.const` to state its identifier, where `<binding>` is the binding of the resource record, `_schema` by default. Its root `required` list must also name the binding. The resource record must export every contract with both entries. A file with neither entry remains an owned support schema. The support schema can still serve a `$ref`. A file with only one entry or an invalid value fails the command.
 
@@ -203,6 +203,15 @@ The materialization command treats each child registry and dependency closure as
 - different bytes for one absolute `$id` in the parent and a child `resources` map.
 
 The parent imports each child `resources` entry under the child path, unless the parent already maps that `$id`.
+
+## Public interface
+
+Two modules form the public interface of Kleisis, and the other modules may change in any release:
+
+- `kleisis.registry` reads a generated registry: `read_registry(path)` returns its `schemas`, `exports` and `resources`, or raises `RegistryError`, whose findings name the rule broken.
+- `kleisis.contracts` checks and parses a contract identifier, `<namespace>:<name>@<version>`.
+
+Both modules import PyYAML and the standard library only. Another tool reads a registry through `kleisis.registry`, or runs the [cases of the registry](specs/cases/registries.yml). It checks a contract identifier through `kleisis.contracts`, through the [schema of the grammar](specs/schemas/contract-identifier.schema.json) by its `$id`, or through the [cases of the grammar](specs/cases/contract-identifiers.yml).
 
 ## Design
 

@@ -1,0 +1,233 @@
+# Conformance cases of the registry format, kleisis:schema-registry@2.
+#
+# Each case gives the text of a registry file, `registry.yml`, and the outcome of a reader: either
+# the four values read, or the rule of the finding that rejects the file. A conforming reader, such
+# as `kleisis.registry.read_registry`, gives the same outcome on each case.
+#
+# The forms `schema_version: 1` and `schema_version: 2` precede the key `_schema`. A reader accepts
+# them while a pinned source still serves one; their cases are marked `legacy`, and they retire with
+# the last such source.
+
+_schema: kleisis:cases@1
+
+cases:
+  # --- The current format ------------------------------------------------------------------------
+
+  - name: current-format
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas:
+        consumer:record@1: specs/schemas/record.schema.yaml
+        tool:base@2: .kleisis/resources/tool/schemas/base.schema.yaml
+      exports: [consumer:record@1]
+      resources:
+        https://example.org/schemas/base.json: .kleisis/resources/tool/schemas/base.schema.yaml
+    expect:
+      version: 2
+      schemas:
+        consumer:record@1: specs/schemas/record.schema.yaml
+        tool:base@2: .kleisis/resources/tool/schemas/base.schema.yaml
+      exports: [consumer:record@1]
+      resources:
+        https://example.org/schemas/base.json: .kleisis/resources/tool/schemas/base.schema.yaml
+
+  - name: dotted-contract
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {gnomon:view.next-act@8: specs/schemas/next-act.schema.yaml}
+    expect:
+      version: 2
+      schemas: {gnomon:view.next-act@8: specs/schemas/next-act.schema.yaml}
+      exports: []
+      resources: {}
+
+  - name: empty-registry
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {}
+      exports: []
+      resources: {}
+    expect: {version: 2, schemas: {}, exports: [], resources: {}}
+
+  - name: exports-absent
+    description: an absent exports reads as none
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {tool:base@1: schemas/base.schema.yaml}
+      resources: {}
+    expect: {version: 2, schemas: {tool:base@1: schemas/base.schema.yaml}, exports: [], resources: {}}
+
+  - name: resources-absent
+    description: an absent resources reads as none, as the decision on tool roles states
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {tool:base@1: schemas/base.schema.yaml}
+    expect: {version: 2, schemas: {tool:base@1: schemas/base.schema.yaml}, exports: [], resources: {}}
+
+  - name: format-not-first
+    description: the order of the keys carries no meaning
+    document: |
+      schemas: {}
+      _schema: kleisis:schema-registry@2
+    expect: {version: 2, schemas: {}, exports: [], resources: {}}
+
+  # --- Legacy forms --------------------------------------------------------------------------------
+
+  - name: legacy-version-2
+    legacy: true
+    document: |
+      schema_version: 2
+      schemas: {tool:base@1: schemas/base.schema.yaml}
+      exports: [tool:base@1]
+      resources: {"urn:tool:base": schemas/base.schema.yaml}
+    expect:
+      version: 2
+      schemas: {tool:base@1: schemas/base.schema.yaml}
+      exports: [tool:base@1]
+      resources: {"urn:tool:base": schemas/base.schema.yaml}
+
+  - name: legacy-version-1
+    legacy: true
+    document: |
+      schema_version: 1
+      schemas: {tool:base@1: schemas/base.schema.yaml}
+      exports: [tool:base@1]
+    expect: {version: 1, schemas: {tool:base@1: schemas/base.schema.yaml}, exports: [tool:base@1], resources: {}}
+
+  - name: legacy-version-1-with-resources
+    legacy: true
+    document: |
+      schema_version: 1
+      schemas: {}
+      resources: {}
+    expect: {error: registry/invalid}
+
+  - name: legacy-version-3
+    legacy: true
+    document: |
+      schema_version: 3
+      schemas: {}
+    expect: {error: registry/invalid}
+
+  # --- Format and keys -----------------------------------------------------------------------------
+
+  - name: format-absent
+    document: |
+      schemas: {}
+    expect: {error: registry/invalid}
+
+  - name: format-other
+    document: |
+      _schema: kleisis:schema-registry@3
+      schemas: {}
+    expect: {error: registry/invalid}
+
+  - name: format-and-legacy-marker
+    document: |
+      _schema: kleisis:schema-registry@2
+      schema_version: 2
+      schemas: {}
+    expect: {error: registry/invalid}
+
+  - name: unknown-key
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {}
+      contracts: {}
+    expect: {error: registry/invalid}
+
+  - name: not-a-mapping
+    document: |
+      - kleisis:schema-registry@2
+    expect: {error: registry/invalid}
+
+  - name: unparsable
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {
+    expect: {error: registry/invalid}
+
+  - name: duplicate-key
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {}
+      schemas: {}
+    expect: {error: registry/invalid}
+
+  # --- schemas -------------------------------------------------------------------------------------
+
+  - name: schemas-absent
+    document: |
+      _schema: kleisis:schema-registry@2
+      resources: {}
+    expect: {error: registry/invalid}
+
+  - name: schemas-not-a-mapping
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: [tool:base@1]
+    expect: {error: registry/invalid}
+
+  - name: schemas-key-outside-grammar
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {tool:Base@1: schemas/base.schema.yaml}
+    expect: {error: contract/identifier}
+
+  - name: schemas-path-absolute
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {tool:base@1: /schemas/base.schema.yaml}
+    expect: {error: path/escape}
+
+  - name: schemas-path-escapes
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {tool:base@1: schemas/../../base.schema.yaml}
+    expect: {error: path/escape}
+
+  # --- exports -------------------------------------------------------------------------------------
+
+  - name: exports-not-a-list
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {tool:base@1: schemas/base.schema.yaml}
+      exports: tool:base@1
+    expect: {error: registry/invalid}
+
+  - name: exports-duplicate
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {tool:base@1: schemas/base.schema.yaml}
+      exports: [tool:base@1, tool:base@1]
+    expect: {error: registry/invalid}
+
+  - name: exports-absent-from-schemas
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {tool:base@1: schemas/base.schema.yaml}
+      exports: [tool:other@1]
+    expect: {error: registry/invalid}
+
+  # --- resources -----------------------------------------------------------------------------------
+
+  - name: resources-key-relative
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {}
+      resources: {schemas/base.json: schemas/base.schema.yaml}
+    expect: {error: registry/invalid}
+
+  - name: resources-path-escapes
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {}
+      resources: {"urn:tool:base": ../base.schema.yaml}
+    expect: {error: path/escape}
+
+  - name: resources-not-a-mapping
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {}
+      resources: [urn:tool:base]
+    expect: {error: registry/invalid}
