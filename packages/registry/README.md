@@ -31,14 +31,29 @@ The package parses YAML as PyYAML parses it: in YAML 1.1, without duplicate keys
 
 ## Installation
 
-Kleisis does not publish the package to a package registry. Moreover, npm installs a Git dependency only from the root of a repository, whereas the package lies in a subfolder. Therefore, a consumer depends on the package by a local path. Since the repository does not hold `dist/`, the consumer builds the package once:
+Each release of Kleisis attaches the package as a tarball, since npm installs no subdirectory of a Git repository. A consumer pins the tarball by its URL in its file `package.json`:
 
-```sh
-(cd ../kleisis/packages/registry && npm install && npm run build)
-npm install ../kleisis/packages/registry
+```json
+{
+  "dependencies": {
+    "@kleisis/registry": "https://github.com/esther-poniatowski/kleisis/releases/download/v<version>/kleisis-registry-<version>.tgz"
+  }
+}
 ```
 
-While Kleisis and a consumer change together, the path names a working copy of Kleisis. To fix the version of the package, the consumer checks out Kleisis at one commit, for example as a Git submodule. Then, the consumer repository records that commit, and the dependency names the package inside that checkout.
+After the command `npm install`, the lockfile of the consumer records the integrity hash of the tarball, and the command `npm ci` refuses a tarball whose bytes differ from that hash. The command below computes the hash of a tarball in the form recorded by the lockfile, so that the hash can be checked against the release before the lockfile adopts it:
+
+```sh
+curl -sL <tarball-url> | openssl dgst -sha512 -binary | base64 | sed 's/^/sha512-/'
+```
+
+During joint development, a consumer points at a local clone of Kleisis instead. The package exports its build output, so the commands below build the package in the clone, then install it in the consumer:
+
+```sh
+npm --prefix ../kleisis/packages/registry install
+npm --prefix ../kleisis/packages/registry run build
+npm install ../kleisis/packages/registry
+```
 
 ## Development
 

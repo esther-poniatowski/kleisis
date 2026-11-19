@@ -1,6 +1,6 @@
 {
   "name": "@kleisis/registry",
-  "version": "0.0.0",
+  "version": "0.2.0",
   "description": "Reads a schema registry of Kleisis, kleisis:schema-registry@2, in TypeScript.",
   "author": "Esther Poniatowski",
   "license": "GPL-3.0-or-later",

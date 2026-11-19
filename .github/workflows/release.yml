@@ -1,0 +1,89 @@
+# ==================================================================================================
+# GitHub Actions Workflow: Semantic Release
+#
+# File: `.github/workflows/release.yml`
+#
+# Bumps the version from the conventional commit messages, creates the GitHub release with the
+# Python distributions, and attaches the tarball of the TypeScript reader `packages/registry`.
+#
+# Trigger: Manual only (workflow_dispatch) for safety.
+#
+# See Also
+# --------
+# - Python Semantic Release: https://python-semantic-release.readthedocs.io/
+# - pyproject.toml, table tool.semantic_release: release configuration
+# ==================================================================================================
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump: auto reads the commit types; patch or minor forces it, as for a release of dependency updates"
+        type: choice
+        options: [auto, patch, minor]
+        default: auto
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Semantic Release
+        run: pip install python-semantic-release
+
+      - name: Record Starting Commit
+        id: head
+        run: echo "before=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Run Semantic Release
+        # Kleisis keeps no changelog file, so the tool generates none.
+        run: semantic-release version --no-changelog ${{ inputs.bump != 'auto' && format('--{0}', inputs.bump) || '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish Distributions
+        # The version command creates the release; the publish command attaches the distributions
+        # built by build_command, matched by dist_glob_patterns.
+        run: semantic-release publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: packages/registry/package-lock.json
+
+      # npm installs no subdirectory of a Git repository, so the TypeScript reader ships as a
+      # tarball attached to the release of its tag. The script prepack builds it at the version
+      # that the version command stamped in its package.json.
+      - name: Attach the TypeScript Reader
+        working-directory: packages/registry
+        run: |
+          tag="$(git tag --points-at HEAD | grep '^v' | head -n 1 || true)"
+          if [ "$(git rev-parse HEAD)" = "${{ steps.head.outputs.before }}" ] || [ -z "$tag" ]; then
+            echo "::notice title=Package skipped::no new release, so no tarball is attached."
+            exit 0
+          fi
+          npm ci
+          npm pack --silent --pack-destination "$RUNNER_TEMP"
+          gh release upload "$tag" "$RUNNER_TEMP"/kleisis-registry-*.tgz
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

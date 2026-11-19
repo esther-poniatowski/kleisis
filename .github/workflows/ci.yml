@@ -1,0 +1,63 @@
+# ==================================================================================================
+# GitHub Actions Workflow: Continuous Integration
+#
+# File: `.github/workflows/ci.yml`
+#
+# Checks the Python package and the TypeScript reader `packages/registry`, both of which run the
+# conformance cases of `specs/cases/`.
+# ==================================================================================================
+
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the package and its development tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install "pytest>=8,<9" "pytest-cov>=5,<6" "mypy>=1.13,<2" "ruff>=0.8,<1" "types-pyyaml>=6,<7"
+      - name: Check formatting and lint (ruff)
+        run: |
+          ruff format --check src tests
+          ruff check src tests
+      - name: Run type checker (mypy)
+        run: mypy
+      - name: Run tests
+        run: python -m pytest
+  registry-package:
+    # The TypeScript reader of the registry, which runs the cases of specs/cases/.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/registry
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: packages/registry/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Check formatting (prettier)
+        run: npm run format:check
+      - name: Run linter (eslint)
+        run: npm run lint
+      - name: Run type checker (tsc)
+        run: npm run typecheck
+      - name: Run tests
+        run: npm test
+      - name: Check the tarball
+        run: npm pack --dry-run
