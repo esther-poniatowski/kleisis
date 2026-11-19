@@ -4,8 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from kleisis.domain.records import load_resource_record
+from kleisis.domain.records import RECORD_FORMAT, load_resource_record
 from kleisis.errors import RecordError
+
+HEADER = (
+    f"_schema: {RECORD_FORMAT}\n"
+    "paths:\n  owned_schemas: specs/schemas\n  registry: specs/schema-registry.yml\n"
+)
+"""The format and the two paths that every configuration declares."""
 
 
 def write_record(tmp_path: Path, body: str) -> Path:
@@ -15,8 +21,8 @@ def write_record(tmp_path: Path, body: str) -> Path:
     return path
 
 
-def test_defaults_are_conventional_repository_paths(tmp_path: Path) -> None:
-    record = load_resource_record(write_record(tmp_path, "_schema: kleisis:schema-resources@2\n"))
+def test_the_state_and_the_convention_take_their_defaults(tmp_path: Path) -> None:
+    record = load_resource_record(write_record(tmp_path, HEADER))
 
     assert record.paths.owned_schemas.as_posix() == "specs/schemas"
     assert record.paths.registry.as_posix() == "specs/schema-registry.yml"
@@ -24,15 +30,27 @@ def test_defaults_are_conventional_repository_paths(tmp_path: Path) -> None:
     assert record.paths.resources.as_posix() == ".kleisis/resources"
     assert record.schemas.suffixes == (".schema.yaml", ".schema.yml", ".schema.json")
     assert record.schemas.binding == "_schema"
-    assert record.format_version == 2
+
+
+@pytest.mark.parametrize(
+    ("paths", "missing"),
+    [
+        ("", "owned_schemas"),
+        ("paths:\n  registry: specs/schema-registry.yml\n", "owned_schemas"),
+        ("paths:\n  owned_schemas: specs/schemas\n", "registry"),
+    ],
+)
+def test_the_schemas_and_the_registry_must_be_declared(
+    tmp_path: Path, paths: str, missing: str
+) -> None:
+    with pytest.raises(RecordError, match=f"declares no paths.{missing}") as caught:
+        load_resource_record(write_record(tmp_path, f"_schema: {RECORD_FORMAT}\n{paths}"))
+    assert caught.value.exit_status == 2
+    assert caught.value.findings[0].locus == f"/paths/{missing}"
 
 
 def test_the_resources_default_lies_in_the_configured_state_folder(tmp_path: Path) -> None:
-    record = load_resource_record(
-        write_record(
-            tmp_path, "_schema: kleisis:schema-resources@2\npaths:\n  state: var/kleisis\n"
-        )
-    )
+    record = load_resource_record(write_record(tmp_path, HEADER + "  state: var/kleisis\n"))
 
     assert record.paths.state.as_posix() == "var/kleisis"
     assert record.paths.resources.as_posix() == "var/kleisis/resources"
@@ -42,7 +60,7 @@ def test_a_configured_resources_folder_overrides_the_state_default(tmp_path: Pat
     record = load_resource_record(
         write_record(
             tmp_path,
-            "_schema: kleisis:schema-resources@2\npaths:\n  resources: .schema-resources\n",
+            HEADER + "  resources: .schema-resources\n",
         )
     )
 
@@ -54,7 +72,7 @@ def test_a_configured_resources_folder_overrides_the_state_default(tmp_path: Pat
 def test_a_format_1_record_names_the_moved_resources_default(tmp_path: Path, body: str) -> None:
     with pytest.raises(RecordError, match="paths.resources: .schema-resources") as caught:
         load_resource_record(write_record(tmp_path, body))
-    assert "_schema: kleisis:schema-resources@2" in str(caught.value)
+    assert f"_schema: {RECORD_FORMAT}" in str(caught.value)
     assert caught.value.exit_status == 2
 
 
@@ -63,16 +81,17 @@ def test_a_format_1_record_names_the_moved_resources_default(tmp_path: Path, bod
     [
         ("exports: []\n", "/_schema"),
         ("_schema: kleisis:schema-resources@1\n", "/_schema"),
+        ("_schema: kleisis:schema-resources@2\n", "/_schema"),
         ("_schema: kleisis:schema-resources@3\n", "/_schema"),
         ("_schema: kleisis:schema-registry@2\n", "/_schema"),
         ("format_version: 1\n", "/format_version"),
-        ("_schema: kleisis:schema-resources@2\nformat_version: 1\n", "/format_version"),
+        (HEADER + "format_version: 1\n", "/format_version"),
     ],
 )
 def test_a_record_without_its_format_identifier_is_rejected(
     tmp_path: Path, body: str, locus: str
 ) -> None:
-    with pytest.raises(RecordError, match="_schema: kleisis:schema-resources@2") as caught:
+    with pytest.raises(RecordError, match=f"_schema: {RECORD_FORMAT}") as caught:
         load_resource_record(write_record(tmp_path, body))
     assert caught.value.exit_status == 2
     assert caught.value.findings[0].locus == locus
@@ -82,7 +101,10 @@ def test_the_schema_convention_is_read_from_the_record(tmp_path: Path) -> None:
     record = load_resource_record(
         write_record(
             tmp_path,
-            """_schema: kleisis:schema-resources@2
+            """_schema: kleisis:configuration@1
+paths:
+  owned_schemas: specs/schemas
+  registry: specs/schema-registry.yml
 schemas:
   suffixes: [.contract.yml]
   binding: $contract
@@ -105,9 +127,7 @@ dependencies:
 
 
 def test_a_partial_schema_convention_keeps_the_other_default(tmp_path: Path) -> None:
-    record = load_resource_record(
-        write_record(tmp_path, "_schema: kleisis:schema-resources@2\nschemas:\n  binding: kind\n")
-    )
+    record = load_resource_record(write_record(tmp_path, HEADER + "schemas:\n  binding: kind\n"))
 
     assert record.schemas.suffixes == (".schema.yaml", ".schema.yml", ".schema.json")
     assert record.schemas.binding == "kind"
@@ -116,25 +136,28 @@ def test_a_partial_schema_convention_keeps_the_other_default(tmp_path: Path) -> 
 @pytest.mark.parametrize(
     "body, message",
     [
-        ("_schema: kleisis:schema-resources@2\nextra: true\n", "unknown fields"),
-        ("_schema: kleisis:schema-resources@2\nschemas:\n  pattern: x\n", "unknown fields"),
-        ("_schema: kleisis:schema-resources@2\nschemas:\n  suffixes: []\n", "must not be empty"),
+        (HEADER + "extra: true\n", "unknown fields"),
+        (HEADER + "schemas:\n  pattern: x\n", "unknown fields"),
+        (HEADER + "schemas:\n  suffixes: []\n", "must not be empty"),
         (
-            "_schema: kleisis:schema-resources@2\nschemas:\n  suffixes: [.yml, .yml]\n",
+            HEADER + "schemas:\n  suffixes: [.yml, .yml]\n",
             "must be unique",
         ),
         (
-            "_schema: kleisis:schema-resources@2\nschemas:\n  suffixes: [schema.yml]\n",
+            HEADER + "schemas:\n  suffixes: [schema.yml]\n",
             "open with a dot",
         ),
         (
-            "_schema: kleisis:schema-resources@2\nschemas:\n  suffixes: [.a/b.yml]\n",
+            HEADER + "schemas:\n  suffixes: [.a/b.yml]\n",
             "open with a dot",
         ),
-        ("_schema: kleisis:schema-resources@2\nschemas:\n  binding: a/b\n", "property name"),
-        ("_schema: kleisis:schema-resources@2\nschemas:\n  binding: ''\n", "non-empty string"),
+        (HEADER + "schemas:\n  binding: a/b\n", "property name"),
+        (HEADER + "schemas:\n  binding: ''\n", "non-empty string"),
         (
-            """_schema: kleisis:schema-resources@2
+            """_schema: kleisis:configuration@1
+paths:
+  owned_schemas: specs/schemas
+  registry: specs/schema-registry.yml
 dependencies:
   - id: shared
     registry: specs/schema-registry.yml
@@ -147,14 +170,18 @@ dependencies:
             "full lowercase Git commit",
         ),
         (
-            """_schema: kleisis:schema-resources@2
+            """_schema: kleisis:configuration@1
 paths:
   owned_schemas: ../schemas
+  registry: specs/schema-registry.yml
 """,
             "must stay inside",
         ),
         (
-            """_schema: kleisis:schema-resources@2
+            """_schema: kleisis:configuration@1
+paths:
+  owned_schemas: specs/schemas
+  registry: specs/schema-registry.yml
 dependencies:
   - id: shared
     registry: specs/schema-registry.yml
@@ -168,7 +195,10 @@ dependencies:
             "must be non-empty when present",
         ),
         (
-            """_schema: kleisis:schema-resources@2
+            """_schema: kleisis:configuration@1
+paths:
+  owned_schemas: specs/schemas
+  registry: specs/schema-registry.yml
 dependencies:
   - id: shared
     registry: specs/schema-registry.yml
@@ -182,7 +212,10 @@ dependencies:
             "path order",
         ),
         (
-            """_schema: kleisis:schema-resources@2
+            """_schema: kleisis:configuration@1
+paths:
+  owned_schemas: specs/schemas
+  registry: specs/schema-registry.yml
 dependencies:
   - id: shared
     registry: specs/schema-registry.yml
@@ -203,11 +236,11 @@ def test_invalid_records_are_rejected(tmp_path: Path, body: str, message: str) -
 
 
 def test_yaml_merge_keys_are_rejected(tmp_path: Path) -> None:
-    with pytest.raises(RecordError, match=r"(?s)merge key `<<`.*record\.yml\", line 4"):
+    with pytest.raises(RecordError, match=r"(?s)merge key `<<`.*record\.yml\", line 7"):
         load_resource_record(
             write_record(
                 tmp_path,
-                "_schema: kleisis:schema-resources@2\nbase: &base {a: 1}\nother:\n  <<: *base\n",
+                HEADER + "base: &base {a: 1}\nother:\n  <<: *base\n",
             )
         )
 
@@ -217,7 +250,7 @@ def test_duplicate_yaml_keys_are_rejected(tmp_path: Path) -> None:
         load_resource_record(
             write_record(
                 tmp_path,
-                "_schema: kleisis:schema-resources@2\n_schema: kleisis:schema-resources@2\n",
+                HEADER + HEADER,
             )
         )
 
@@ -226,7 +259,10 @@ def test_git_source_records_credential_and_archive_roots(tmp_path: Path) -> None
     record = load_resource_record(
         write_record(
             tmp_path,
-            """_schema: kleisis:schema-resources@2
+            """_schema: kleisis:configuration@1
+paths:
+  owned_schemas: specs/schemas
+  registry: specs/schema-registry.yml
 dependencies:
   - id: private-source
     source:
@@ -257,7 +293,10 @@ def test_dependency_may_select_no_contract(tmp_path: Path, contracts: str) -> No
     record = load_resource_record(
         write_record(
             tmp_path,
-            f"""_schema: kleisis:schema-resources@2
+            f"""_schema: kleisis:configuration@1
+paths:
+  owned_schemas: specs/schemas
+  registry: specs/schema-registry.yml
 dependencies:
   - id: primitives
     source:
@@ -277,7 +316,10 @@ def test_dependency_contracts_must_be_unique(tmp_path: Path) -> None:
         load_resource_record(
             write_record(
                 tmp_path,
-                """_schema: kleisis:schema-resources@2
+                """_schema: kleisis:configuration@1
+paths:
+  owned_schemas: specs/schemas
+  registry: specs/schema-registry.yml
 dependencies:
   - id: shared
     source:
@@ -306,7 +348,7 @@ dependencies:
 )
 def test_a_contract_outside_the_grammar_is_rejected(tmp_path: Path, body: str, locus: str) -> None:
     with pytest.raises(RecordError, match="no contract identifier") as caught:
-        load_resource_record(write_record(tmp_path, "_schema: kleisis:schema-resources@2\n" + body))
+        load_resource_record(write_record(tmp_path, HEADER + body))
     finding = caught.value.findings[0]
     assert finding.rule.id == "contract/identifier"
     assert finding.locus == locus

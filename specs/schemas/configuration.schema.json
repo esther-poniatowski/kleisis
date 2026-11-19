@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/esther-poniatowski/kleisis/specs/schemas/configuration.schema.json",
+  "title": "kleisis:configuration@1",
+  "description": "the configuration kleisis.yml of a consumer: its paths, its schema convention, its exports, its exact dependencies and its child projects",
+  "type": "object",
+  "required": ["_schema", "paths"],
+  "additionalProperties": false,
+  "properties": {
+    "_schema": {
+      "description": "the format identifier of the configuration",
+      "const": "kleisis:configuration@1"
+    },
+    "paths": {
+      "description": "the paths of the consumer, below its root",
+      "type": "object",
+      "required": ["owned_schemas", "registry"],
+      "additionalProperties": false,
+      "properties": {
+        "owned_schemas": {"description": "the folder of the owned schemas", "$ref": "#/$defs/relative-path"},
+        "registry": {"description": "the generated registry, committed content of the consumer", "$ref": "#/$defs/relative-path"},
+        "state": {"description": "the folder that Kleisis alone reads; .kleisis by default", "$ref": "#/$defs/relative-path"},
+        "resources": {"description": "the folder of the materialized schemas; <state>/resources by default", "$ref": "#/$defs/relative-path"}
+      }
+    },
+    "schemas": {
+      "description": "the names by which the consumer marks its schema files and its contracts",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "suffixes": {
+          "description": "the name endings of a schema file; .schema.yaml, .schema.yml and .schema.json by default",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^\\.[A-Za-z0-9_.-]+$"}
+        },
+        "binding": {"$ref": "#/$defs/binding"}
+      }
+    },
+    "exports": {
+      "description": "the contracts owned by the consumer",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "https://github.com/esther-poniatowski/kleisis/specs/schemas/contract-identifier.schema.json"}
+    },
+    "dependencies": {
+      "description": "the exact external sources, each with the contracts selected from it",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "source", "registry"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+          "source": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": ["kind", "repository", "commit"],
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {"const": "git"},
+                  "repository": {"$ref": "#/$defs/https-url"},
+                  "commit": {"$ref": "#/$defs/commit"},
+                  "credential_env": {"type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$"},
+                  "archive_roots": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {"$ref": "#/$defs/relative-path"}
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": ["kind", "locator", "source_commit", "sha256"],
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {"const": "artifact"},
+                  "locator": {"$ref": "#/$defs/https-url"},
+                  "source_commit": {"$ref": "#/$defs/commit"},
+                  "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                }
+              }
+            ]
+          },
+          "registry": {"$ref": "#/$defs/relative-path"},
+          "contracts": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"$ref": "https://github.com/esther-poniatowski/kleisis/specs/schemas/contract-identifier.schema.json"}
+          },
+          "binding": {"$ref": "#/$defs/binding"}
+        }
+      }
+    },
+    "projects": {
+      "description": "the child repositories whose exports the consumer imports",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path"],
+        "additionalProperties": false,
+        "properties": {
+          "path": {"$ref": "#/$defs/relative-path"},
+          "required": {"type": "boolean"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "relative-path": {
+      "description": "a path below the root, with segments separated by '/' and no segment '..'",
+      "type": "string",
+      "minLength": 1,
+      "not": {"pattern": "^/|(?:^|/)\\.\\.(?:/|$)|^\\.$"}
+    },
+    "binding": {
+      "description": "the root property that carries the identifier of a contract; _schema by default",
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+    },
+    "commit": {"description": "a full lowercase Git commit", "type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "https-url": {"description": "a web address starting with https://, without authentication data", "type": "string", "pattern": "^https://[^@/]+(?:/|$)"}
+  }
+}

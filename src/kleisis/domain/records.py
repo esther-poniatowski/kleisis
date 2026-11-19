@@ -1,4 +1,8 @@
-"""Parsing and structural validation for resource records."""
+"""Parsing and structural validation of the configuration file `kleisis.yml`.
+
+The configuration records the resources of a consumer: its paths, its exports, its dependencies
+and its child projects. The code names it the resource record.
+"""
 
 from __future__ import annotations
 
@@ -14,6 +18,7 @@ from kleisis.domain.documents import load_document
 from kleisis.domain.models import (
     DEFAULT_BINDING,
     DEFAULT_SCHEMA_SUFFIXES,
+    DEFAULT_STATE,
     FORMER_RESOURCES,
     RESOURCES_IN_STATE,
     ArtifactSource,
@@ -28,17 +33,17 @@ from kleisis.domain.models import (
 from kleisis.errors import RecordError
 from kleisis.findings import CONTRACT_IDENTIFIER, RECORD_UNREADABLE, field_pointer, pointer
 
-FORMAT_MAJOR = 2
-"""The major version of the resource-record format that this release reads."""
-RECORD_FORMAT = f"kleisis:schema-resources@{FORMAT_MAJOR}"
-"""The format identifier that a resource record declares in its first key ``_schema``.
-
-Format 2 moved the default of ``paths.resources`` from ``.schema-resources`` into the state
-folder, so a record of format 1 that omits the key would be read at another place.
-"""
+RECORD_FORMAT = "kleisis:configuration@1"
+"""The format identifier that the configuration declares in its key ``_schema``."""
+RETIRED_FORMATS = ("kleisis:schema-resources@1", "kleisis:schema-resources@2")
+"""The formats of the former record `specs/schema-resources.yml`, rejected with the upgrade."""
+_UPGRADE = (
+    f"write _schema: {RECORD_FORMAT} in kleisis.yml, and declare paths.owned_schemas and "
+    "paths.registry, which no longer default to specs/schemas and specs/schema-registry.yml"
+)
 _FORMAT_1_NOTE = (
-    f"format 2 moved the default of paths.resources from {FORMER_RESOURCES} to "
-    f"<paths.state>/{RESOURCES_IN_STATE}; a record that keeps the former folder sets "
+    f"format 1 kept the resources in {FORMER_RESOURCES}, now <paths.state>/{RESOURCES_IN_STATE} "
+    f"by default; a configuration that keeps the former folder sets "
     f"paths.resources: {FORMER_RESOURCES}"
 )
 
@@ -114,12 +119,12 @@ def _portable_https_url(value: object, field_name: str) -> str:
 
 
 def load_resource_record(path: Path) -> ResourceRecord:
-    """Load a resource record and reject every undeclared field."""
+    """Load the configuration of a consumer and reject every undeclared field."""
     try:
         raw = load_document(path)
     except (OSError, TypeError, ValueError, yaml.YAMLError) as exc:
         raise RecordError(
-            f"cannot read resource record {path}: {exc}", rule=RECORD_UNREADABLE, subject=path
+            f"cannot read the configuration {path}: {exc}", rule=RECORD_UNREADABLE, subject=path
         ) from exc
     try:
         return _resource_record(raw)
@@ -129,29 +134,36 @@ def load_resource_record(path: Path) -> ResourceRecord:
 
 
 def _check_format(root: dict[str, Any]) -> None:
-    """Require the record to declare ``_schema: kleisis:schema-resources@2``, without alias.
+    """Require the configuration to declare ``_schema: kleisis:configuration@1``, without alias.
 
-    A record of format 1, by ``_schema`` or by the retired key ``format_version``, is rejected
-    with the change of default that its upgrade must take into account.
+    A former record, by a retired format or by the retired key ``format_version``, is rejected
+    with its upgrade; a record of format 1 also names its moved default.
     """
-    expected = f"write _schema: {RECORD_FORMAT} as the first key"
+    expected = f"write _schema: {RECORD_FORMAT}"
     if "format_version" in root:
         raise RecordError(
-            f"the key format_version is retired; {expected}; {_FORMAT_1_NOTE}",
+            f"the key format_version is retired; {_UPGRADE}; {_FORMAT_1_NOTE}",
             locus=pointer("format_version"),
         )
     if "_schema" not in root:
-        raise RecordError(f"the record declares no _schema; {expected}", locus=pointer("_schema"))
-    if root["_schema"] != RECORD_FORMAT:
-        note = f"; {_FORMAT_1_NOTE}" if root["_schema"] == "kleisis:schema-resources@1" else ""
         raise RecordError(
-            f"the record declares _schema {root['_schema']!r}; {expected}{note}",
+            f"the configuration declares no _schema; {expected}", locus=pointer("_schema")
+        )
+    declared = root["_schema"]
+    if declared in RETIRED_FORMATS:
+        note = f"; {_FORMAT_1_NOTE}" if declared == RETIRED_FORMATS[0] else ""
+        raise RecordError(
+            f"the format {declared} is retired; {_UPGRADE}{note}", locus=pointer("_schema")
+        )
+    if declared != RECORD_FORMAT:
+        raise RecordError(
+            f"the configuration declares _schema {declared!r}; {expected}",
             locus=pointer("_schema"),
         )
 
 
 def _resource_record(raw: object) -> ResourceRecord:
-    root = _mapping(raw, "resource record")
+    root = _mapping(raw, "configuration")
     _check_format(root)
     _keys(
         root,
@@ -161,16 +173,17 @@ def _resource_record(raw: object) -> ResourceRecord:
 
     raw_paths = _mapping(root.get("paths", {}), "paths")
     _keys(raw_paths, {"owned_schemas", "registry", "resources", "state"}, "paths")
-    defaults = Paths()
-    state = safe_relative_path(raw_paths.get("state", defaults.state.as_posix()), "paths.state")
+    for required in ("owned_schemas", "registry"):
+        if required not in raw_paths:
+            raise RecordError(
+                f"the configuration declares no paths.{required}; Kleisis assumes no folder of "
+                "the consumer",
+                locus=pointer("paths", required),
+            )
+    state = safe_relative_path(raw_paths.get("state", DEFAULT_STATE.as_posix()), "paths.state")
     paths = Paths(
-        owned_schemas=safe_relative_path(
-            raw_paths.get("owned_schemas", defaults.owned_schemas.as_posix()),
-            "paths.owned_schemas",
-        ),
-        registry=safe_relative_path(
-            raw_paths.get("registry", defaults.registry.as_posix()), "paths.registry"
-        ),
+        owned_schemas=safe_relative_path(raw_paths["owned_schemas"], "paths.owned_schemas"),
+        registry=safe_relative_path(raw_paths["registry"], "paths.registry"),
         resources=safe_relative_path(
             raw_paths.get("resources", (state / RESOURCES_IN_STATE).as_posix()),
             "paths.resources",
@@ -342,7 +355,6 @@ def _resource_record(raw: object) -> ResourceRecord:
         projects.append(Project(path=project_path, required=required))
 
     return ResourceRecord(
-        format_version=FORMAT_MAJOR,
         paths=paths,
         schemas=schemas,
         exports=exports,

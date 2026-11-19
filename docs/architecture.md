@@ -1,12 +1,12 @@
 # Architecture and invariants
 
-Kleisis rebuilds a consumer repository's schema set from declared source states. A reproducible result requires identical consumer inputs across machines. The owned schemas, resource record and child checkout states constitute those inputs. Therefore, the package modules must isolate source access and replace both generated outputs together.
+Kleisis rebuilds a consumer repository's schema set from declared source states. A reproducible result requires identical consumer inputs across machines. The owned schemas, the configuration and the child checkout states constitute those inputs. Therefore, the package modules must isolate source access and replace both generated outputs together.
 
 ## System boundary
 
 Kleisis builds the closure in four steps:
 
-- parse and validate the consumer resource record;
+- parse and validate the configuration `kleisis.yml` of the consumer;
 - acquire each dependency at an exact source state;
 - copy each selected schema and its reference closure, which an absolute `$ref` can extend into another declared dependency;
 - generate local or composite registries from the resulting files.
@@ -29,13 +29,13 @@ The package separates contract semantics from external effects:
 | `infrastructure` | acquires sources; checks files; replaces outputs | application ports and domain objects |
 | `cli` | maps commands to the application service, and writes each failure as a line or as a SARIF result | application service and findings |
 
-The source-provider port keeps machine access outside the application rules. Therefore, tests can supply fixed trees through that port. However, canonical resource records still reject local checkout paths.
+The source-provider port keeps machine access outside the application rules. Therefore, tests can supply fixed trees through that port. However, a canonical configuration still rejects local checkout paths.
 
 ## Materialization flow
 
 A materialization run constructs a complete candidate before it changes the consumer repository:
 
-1. The consumer revision fixes owned schemas and child checkout states, while the resource record fixes external states and declares all paths.
+1. The consumer revision fixes owned schemas and child checkout states, while the configuration fixes external states and declares all paths.
 2. Each source provider acquires its declared state in an isolated stage. The materialization command stages in the state folder, as `<state>/stage-<random>/`, so that publication moves the candidate by renames below the root. The check and validation commands write nothing in the repository, so they stage in the system temporary folder.
 3. Each selected registry entry must match the schema-binding path `<binding>.const` of its target, where the dependency entry names the binding, `_schema` by default.
 4. The resolver closes the selected contracts across the acquired sources, and the materializer copies each reached file under the directory of its dependency.
@@ -46,7 +46,7 @@ A materialization run constructs a complete candidate before it changes the cons
 
 Before the publisher runs, a build failure deletes its stage. A stage that a crash leaves in the state folder is never read: no journal names it, and it lies outside the resource directory. The next materialization deletes it after recovery and before its own build. Two materialization runs on one root at once are not supported. The publisher may fail during either write. Then, the publisher immediately tries to restore the resource directory and registry. If it cannot restore them, it retains the journal `transaction.json` of the state folder, `.kleisis/` by default, where it also keeps the backup of each output. A later run reads that journal and completes recovery before building a new candidate. The state folder lies below the root, as the outputs, so each backup and each installation of a candidate is a rename within one file system, unless a folder below the root is a separate mount point. Such a rename fails, and the publisher rolls back as for any other failed write.
 
-Recovery also accepts the journals that earlier releases left at the root, `.kleisis-transaction.json` and `.schema-closure-transaction.json`, each with its backups beside their outputs and its own backup names. Publication refuses to start while any of the three journals exists, and recovery refuses to choose between two of them. The validated record confines recovery to the two output paths that it declares. A journal at a former place may instead name the resources at `.schema-resources`, their default place in format 1 of the resource record, so that an interrupted run of an earlier release is recovered after the upgrade.
+Recovery also accepts the journals that earlier releases left at the root, `.kleisis-transaction.json` and `.schema-closure-transaction.json`, each with its backups beside their outputs and its own backup names. Publication refuses to start while any of the three journals exists, and recovery refuses to choose between two of them. The validated record confines recovery to the two output paths that it declares. A journal at a former place may instead name the resources at `.schema-resources`, their default place in format 1 of the former resource record, so that an interrupted run of an earlier release is recovered after the upgrade.
 
 ## Reference semantics
 
@@ -67,7 +67,7 @@ The containing file supplies the base directory. The schema keyword `$id` does n
 Every generated registry must satisfy these invariants:
 
 - every identifier is unique;
-- every owned contract carries a complete root binding, named by the resource record and `_schema` by default, and enters the export set;
+- every owned contract carries a complete root binding, named by the configuration and `_schema` by default, and enters the export set;
 - every owned file without a binding trace remains outside the registry as a support schema;
 - every generated target stays inside the consumer repository;
 - every imported child export stays inside its declared child repository;
@@ -81,4 +81,4 @@ Every generated registry must satisfy these invariants:
 - every owned or materialized file whose root declares an absolute `$id` enters `resources`;
 - two files declaring one `$id` have identical bytes, and the first file in owned, materialized, then child order keeps the entry.
 
-The deterministic serializer writes `_schema: kleisis:schema-registry@2` as the first key, and sorts identifiers, exports and `resources` keys. Therefore, the check command can compare generated bytes without normalizing a committed registry, and it reports a legacy registry of the consumer as drift. The registry reader also accepts the legacy forms `schema_version: 1`, which has no `resources` key, and `schema_version: 2` in dependency and child registries, since a consumer cannot regenerate them. This is the one exception to the rule that a format identifier has no alias: the resource record accepts only `_schema: kleisis:schema-resources@2`, and the check reports a receipt in another format as drift.
+The deterministic serializer writes `_schema: kleisis:schema-registry@2` as the first key, and sorts identifiers, exports and `resources` keys. Therefore, the check command can compare generated bytes without normalizing a committed registry, and it reports a legacy registry of the consumer as drift. The registry reader also accepts the legacy forms `schema_version: 1`, which has no `resources` key, and `schema_version: 2` in dependency and child registries, since a consumer cannot regenerate them. These legacy forms are the only exception to the rule that a format identifier has no alias. The configuration accepts only `_schema: kleisis:configuration@1`, and the check reports a receipt in another format as drift.

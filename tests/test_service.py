@@ -24,7 +24,13 @@ from kleisis.infrastructure.filesystem import copy_tree
 from kleisis.infrastructure.publication import publish_pair
 from kleisis.infrastructure.sources import ExactSourceProvider
 
-RECORD_MARKER = "_schema: kleisis:schema-resources@2\n"
+CONFIG = PurePosixPath("kleisis.yml")
+"""The configuration of the consumer in each test tree."""
+
+RECORD_MARKER = (
+    "_schema: kleisis:configuration@1\n"
+    "paths:\n  owned_schemas: specs/schemas\n  registry: specs/schema-registry.yml\n"
+)
 REGISTRY_MARKER = "_schema: kleisis:schema-registry@2"
 RECEIPT_MARKER = "_schema: kleisis:receipt@1"
 
@@ -36,8 +42,11 @@ def make_consumer(root: Path, commit: str) -> None:
     (schemas / "owned.schema.yaml").write_text(
         concrete_schema("consumer:owned@1"), encoding="utf-8"
     )
-    (root / "specs/schema-resources.yml").write_text(
-        f"""_schema: kleisis:schema-resources@2
+    (root / "kleisis.yml").write_text(
+        f"""_schema: kleisis:configuration@1
+paths:
+  owned_schemas: specs/schemas
+  registry: specs/schema-registry.yml
 exports:
   - consumer:owned@1
 dependencies:
@@ -100,8 +109,7 @@ exports:
     git(["commit", "--quiet", "-m", "linked fixture"], source_root)
     commit = git(["rev-parse", "HEAD"], source_root)
     return ResourceRecord(
-        format_version=1,
-        paths=Paths(),
+        paths=Paths(PurePosixPath("specs/schemas"), PurePosixPath("specs/schema-registry.yml")),
         dependencies=(
             Dependency(
                 id="shared",
@@ -160,7 +168,7 @@ def test_materialize_publishes_closure_and_registry(
     source, commit = exact_source
     consumer = tmp_path / "consumer"
     make_consumer(consumer, commit)
-    service = SchemaClosureService(source_provider=CopySourceProvider(source))
+    service = SchemaClosureService(CONFIG, source_provider=CopySourceProvider(source))
 
     service.materialize(consumer)
 
@@ -178,7 +186,7 @@ def test_check_detects_resource_drift(tmp_path: Path, exact_source: tuple[Path, 
     source, commit = exact_source
     consumer = tmp_path / "consumer"
     make_consumer(consumer, commit)
-    service = SchemaClosureService(source_provider=CopySourceProvider(source))
+    service = SchemaClosureService(CONFIG, source_provider=CopySourceProvider(source))
     service.materialize(consumer)
     target = consumer / ".kleisis/resources/shared/schemas/main.schema.yaml"
     target.write_text(target.read_text(encoding="utf-8") + "# drift\n", encoding="utf-8")
@@ -190,16 +198,18 @@ def test_check_detects_resource_drift(tmp_path: Path, exact_source: tuple[Path, 
 def test_resource_path_cannot_overlap_sources(tmp_path: Path) -> None:
     root = tmp_path / "consumer"
     (root / "specs/schemas").mkdir(parents=True)
-    (root / "specs/schema-resources.yml").write_text(
-        """_schema: kleisis:schema-resources@2
+    (root / "kleisis.yml").write_text(
+        """_schema: kleisis:configuration@1
 paths:
+  owned_schemas: specs/schemas
+  registry: specs/schema-registry.yml
   resources: specs
 """,
         encoding="utf-8",
     )
 
     with pytest.raises(RecordError, match="overlaps"):
-        SchemaClosureService().load(root)
+        SchemaClosureService(CONFIG).load(root)
 
 
 def test_materialize_publishes_in_a_configured_state_folder(
@@ -208,11 +218,16 @@ def test_materialize_publishes_in_a_configured_state_folder(
     source, commit = exact_source
     consumer = tmp_path / "consumer"
     make_consumer(consumer, commit)
-    record = consumer / "specs/schema-resources.yml"
+    record = consumer / "kleisis.yml"
     record.write_text(
-        record.read_text(encoding="utf-8") + "paths:\n  state: var/kleisis\n", encoding="utf-8"
+        record.read_text(encoding="utf-8").replace(
+            "  registry: specs/schema-registry.yml\n",
+            "  registry: specs/schema-registry.yml\n  state: var/kleisis\n",
+            1,
+        ),
+        encoding="utf-8",
     )
-    service = SchemaClosureService(source_provider=CopySourceProvider(source))
+    service = SchemaClosureService(CONFIG, source_provider=CopySourceProvider(source))
 
     service.materialize(consumer)
 
@@ -253,7 +268,7 @@ def test_materialize_recovers_a_journal_left_at_the_former_place(
         ),
         encoding="utf-8",
     )
-    service = SchemaClosureService(source_provider=CopySourceProvider(source))
+    service = SchemaClosureService(CONFIG, source_provider=CopySourceProvider(source))
 
     service.materialize(consumer)
 
@@ -270,7 +285,7 @@ def test_materialize_recovers_a_journal_left_at_the_former_place(
     [
         ("  state: specs\n", "paths.state overlaps paths.owned_schemas"),
         ("  state: specs/schema-registry.yml\n", "paths.state overlaps paths.registry"),
-        ("  state: specs/schema-resources.yml\n", "paths.state overlaps record path"),
+        ("  state: kleisis.yml\n", "paths.state overlaps record path"),
         ("  state: var\n  resources: var\n", "paths.resources must not contain paths.state"),
         (
             "  state: var/kleisis\n  resources: var\n",
@@ -283,25 +298,23 @@ def test_state_folder_cannot_overlap_sources_or_resources(
 ) -> None:
     root = tmp_path / "consumer"
     (root / "specs/schemas").mkdir(parents=True)
-    (root / "specs/schema-resources.yml").write_text(
-        f"{RECORD_MARKER}paths:\n{paths}", encoding="utf-8"
-    )
+    (root / "kleisis.yml").write_text(f"{RECORD_MARKER}{paths}", encoding="utf-8")
 
     with pytest.raises(RecordError, match=field):
-        SchemaClosureService().load(root)
+        SchemaClosureService(CONFIG).load(root)
 
 
 def test_state_folder_cannot_overlap_a_child_checkout(tmp_path: Path) -> None:
     root = tmp_path / "consumer"
     (root / "specs/schemas").mkdir(parents=True)
-    (root / "specs/schema-resources.yml").write_text(
-        f"{RECORD_MARKER}paths:\n  state: projects\n  resources: resources\n"
+    (root / "kleisis.yml").write_text(
+        f"{RECORD_MARKER}  state: projects\n  resources: resources\n"
         "projects:\n  - path: projects/child\n",
         encoding="utf-8",
     )
 
     with pytest.raises(RecordError, match="paths.state overlaps project checkout"):
-        SchemaClosureService().load(root)
+        SchemaClosureService(CONFIG).load(root)
 
 
 def test_selected_registry_key_must_match_schema_binding(
@@ -315,7 +328,7 @@ def test_selected_registry_key_must_match_schema_binding(
     )
     consumer = tmp_path / "consumer"
     make_consumer(consumer, commit)
-    service = SchemaClosureService(source_provider=CopySourceProvider(source))
+    service = SchemaClosureService(CONFIG, source_provider=CopySourceProvider(source))
 
     with pytest.raises(RegistryError, match="declaring 'source:other@1'"):
         service.validate(consumer)
@@ -329,12 +342,13 @@ def test_exported_schema_closure_must_be_present(tmp_path: Path) -> None:
         concrete_schema("consumer:owned@1", reference="missing.schema.yaml"),
         encoding="utf-8",
     )
-    (root / "specs/schema-resources.yml").write_text(
-        "_schema: kleisis:schema-resources@2\nexports: [consumer:owned@1]\n", encoding="utf-8"
+    (root / "kleisis.yml").write_text(
+        RECORD_MARKER + "exports: [consumer:owned@1]\n",
+        encoding="utf-8",
     )
 
     with pytest.raises(ReferenceError, match="not a regular source file"):
-        SchemaClosureService().validate(root)
+        SchemaClosureService(CONFIG).validate(root)
 
 
 def test_every_owned_contract_must_be_exported(tmp_path: Path) -> None:
@@ -347,12 +361,13 @@ def test_every_owned_contract_must_be_exported(tmp_path: Path) -> None:
     (schemas / "hidden.schema.yaml").write_text(
         concrete_schema("consumer:hidden@1"), encoding="utf-8"
     )
-    (root / "specs/schema-resources.yml").write_text(
-        "_schema: kleisis:schema-resources@2\nexports: [consumer:exported@1]\n", encoding="utf-8"
+    (root / "kleisis.yml").write_text(
+        RECORD_MARKER + "exports: [consumer:exported@1]\n",
+        encoding="utf-8",
     )
 
     with pytest.raises(RegistryError, match="owned contracts are absent from exports"):
-        SchemaClosureService().validate(root)
+        SchemaClosureService(CONFIG).validate(root)
 
 
 def test_the_record_convention_selects_the_owned_contracts(tmp_path: Path) -> None:
@@ -362,14 +377,13 @@ def test_the_record_convention_selects_the_owned_contracts(tmp_path: Path) -> No
     (schemas / "record.contract.yml").write_text(
         "required: [kind]\nproperties:\n  kind: {const: consumer:record@1}\n", encoding="utf-8"
     )
-    (root / "specs/schema-resources.yml").write_text(
-        "_schema: kleisis:schema-resources@2\n"
-        "schemas: {suffixes: [.contract.yml], binding: kind}\n"
+    (root / "kleisis.yml").write_text(
+        RECORD_MARKER + "schemas: {suffixes: [.contract.yml], binding: kind}\n"
         "exports: [consumer:record@1]\n",
         encoding="utf-8",
     )
 
-    SchemaClosureService().materialize(root)
+    SchemaClosureService(CONFIG).materialize(root)
 
     registry = load_registry(root / "specs/schema-registry.yml")
     assert registry.schemas == {
@@ -389,7 +403,7 @@ def test_failed_build_removes_staging_directory(tmp_path: Path) -> None:
     root = tmp_path / "consumer"
     commit = "a" * 40
     make_consumer(root, commit)
-    service = SchemaClosureService(source_provider=FailingProvider())
+    service = SchemaClosureService(CONFIG, source_provider=FailingProvider())
 
     with pytest.raises(RegistryError, match="planted acquisition failure"):
         service.validate(root)
@@ -417,7 +431,7 @@ def test_materialize_stages_in_the_state_folder(
     consumer = tmp_path / "consumer"
     make_consumer(consumer, commit)
     parents = _recording_mkdtemp(monkeypatch)
-    service = SchemaClosureService(source_provider=CopySourceProvider(source))
+    service = SchemaClosureService(CONFIG, source_provider=CopySourceProvider(source))
 
     service.materialize(consumer)
 
@@ -430,7 +444,7 @@ def test_materialize_stages_in_the_state_folder(
 def test_a_failed_materialize_deletes_its_stage(tmp_path: Path) -> None:
     root = tmp_path / "consumer"
     make_consumer(root, "a" * 40)
-    service = SchemaClosureService(source_provider=FailingProvider())
+    service = SchemaClosureService(CONFIG, source_provider=FailingProvider())
 
     with pytest.raises(RegistryError, match="planted acquisition failure"):
         service.materialize(root)
@@ -453,7 +467,7 @@ def test_a_stage_left_by_a_crash_neither_blocks_nor_enters_the_next_run(
     (leftover / "transaction.json").write_text('{"entries": []}\n', encoding="utf-8")
     unrelated = consumer / ".kleisis/stage-crashed1.0.backup"
     unrelated.mkdir()
-    service = SchemaClosureService(source_provider=CopySourceProvider(source))
+    service = SchemaClosureService(CONFIG, source_provider=CopySourceProvider(source))
 
     service.materialize(consumer)
 
@@ -482,7 +496,7 @@ def test_the_validation_copy_never_holds_the_state_folder(
         original(source_tree, target)
 
     monkeypatch.setattr("kleisis.application.service.copy_tree", recording)
-    service = SchemaClosureService(source_provider=CopySourceProvider(source))
+    service = SchemaClosureService(CONFIG, source_provider=CopySourceProvider(source))
 
     service.materialize(consumer)
 
@@ -506,7 +520,7 @@ def test_check_does_not_stage_beside_consumer(
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     make_consumer(consumer, commit)
-    service = SchemaClosureService(source_provider=CopySourceProvider(source))
+    service = SchemaClosureService(CONFIG, source_provider=CopySourceProvider(source))
     service.materialize(consumer)
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(scratch))
 
@@ -562,8 +576,11 @@ def test_composite_registry_imports_child_exports_and_checks_shared_bytes(
     (schemas / "parent.schema.yaml").write_text(concrete_schema("parent:owned@1"), encoding="utf-8")
     shared = concrete_schema("shared:contract@1")
     (schemas / "shared.schema.yaml").write_text(shared, encoding="utf-8")
-    (root / "specs/schema-resources.yml").write_text(
-        """_schema: kleisis:schema-resources@2
+    (root / "kleisis.yml").write_text(
+        """_schema: kleisis:configuration@1
+paths:
+  owned_schemas: specs/schemas
+  registry: specs/schema-registry.yml
 exports: [parent:owned@1, shared:contract@1]
 projects:
   - path: projects/child
@@ -588,7 +605,7 @@ exports:
         encoding="utf-8",
     )
 
-    candidate = SchemaClosureService().build(root)
+    candidate = SchemaClosureService(CONFIG).build(root)
     try:
         assert candidate.registry.schemas["child:owned@1"].as_posix() == (
             "projects/child/specs/schemas/child.schema.yaml"
@@ -602,8 +619,11 @@ def test_composite_registry_rejects_missing_child_export_closure(tmp_path: Path)
     schemas = root / "specs/schemas"
     schemas.mkdir(parents=True)
     (schemas / "parent.schema.yaml").write_text(concrete_schema("parent:owned@1"), encoding="utf-8")
-    (root / "specs/schema-resources.yml").write_text(
-        """_schema: kleisis:schema-resources@2
+    (root / "kleisis.yml").write_text(
+        """_schema: kleisis:configuration@1
+paths:
+  owned_schemas: specs/schemas
+  registry: specs/schema-registry.yml
 exports: [parent:owned@1]
 projects:
   - path: projects/child
@@ -627,7 +647,7 @@ exports:
     )
 
     with pytest.raises(ReferenceError, match="not a regular source file"):
-        SchemaClosureService().validate(root)
+        SchemaClosureService(CONFIG).validate(root)
 
 
 class MappedSourceProvider:
@@ -700,7 +720,10 @@ exports: [shared:main@1]
             "specs/schemas/owned.schema.yaml": concrete_schema(
                 "consumer:owned@1", reference=owned_reference
             ),
-            "specs/schema-resources.yml": f"""_schema: kleisis:schema-resources@2
+            "kleisis.yml": f"""_schema: kleisis:configuration@1
+paths:
+  owned_schemas: specs/schemas
+  registry: specs/schema-registry.yml
 exports: [consumer:owned@1]
 dependencies:
   - id: shared
@@ -719,7 +742,7 @@ dependencies:
 
 def test_closure_spans_two_sources_through_absolute_identifiers(tmp_path: Path) -> None:
     consumer, provider = make_two_sources(tmp_path, NOTE)
-    service = SchemaClosureService(source_provider=provider)
+    service = SchemaClosureService(CONFIG, source_provider=provider)
 
     service.materialize(consumer)
 
@@ -747,7 +770,7 @@ def test_closure_spans_two_sources_through_absolute_identifiers(tmp_path: Path) 
 def test_receipt_declares_its_format_first(tmp_path: Path) -> None:
     consumer, provider = make_two_sources(tmp_path, NOTE)
 
-    SchemaClosureService(source_provider=provider).materialize(consumer)
+    SchemaClosureService(CONFIG, source_provider=provider).materialize(consumer)
 
     lines = (consumer / ".kleisis/resources/receipt.yml").read_text(encoding="utf-8").splitlines()
     assert lines[0] == RECEIPT_MARKER
@@ -761,7 +784,7 @@ def test_receipt_declares_its_format_first(tmp_path: Path) -> None:
 )
 def test_receipt_in_another_format_is_stale(tmp_path: Path, header: str) -> None:
     consumer, provider = make_two_sources(tmp_path, NOTE)
-    service = SchemaClosureService(source_provider=provider)
+    service = SchemaClosureService(CONFIG, source_provider=provider)
     service.materialize(consumer)
     receipt = consumer / ".kleisis/resources/receipt.yml"
     lines = receipt.read_text(encoding="utf-8").splitlines(keepends=True)
@@ -777,7 +800,7 @@ def test_receipt_in_another_format_is_stale(tmp_path: Path, header: str) -> None
 
 def test_legacy_own_registry_is_drift_and_is_rewritten(tmp_path: Path) -> None:
     consumer, provider = make_two_sources(tmp_path, NOTE)
-    service = SchemaClosureService(source_provider=provider)
+    service = SchemaClosureService(CONFIG, source_provider=provider)
     service.materialize(consumer)
     registry = consumer / "specs/schema-registry.yml"
     current = registry.read_text(encoding="utf-8")
@@ -811,7 +834,7 @@ def test_dependency_registry_is_read_in_each_accepted_form(tmp_path: Path, heade
             )
         },
     )
-    service = SchemaClosureService(source_provider=provider)
+    service = SchemaClosureService(CONFIG, source_provider=provider)
 
     service.materialize(consumer)
 
@@ -839,7 +862,7 @@ def test_dependency_registry_without_its_format_identifier_fails(
     )
 
     with pytest.raises(RegistryError, match="write _schema: kleisis:schema-registry@2"):
-        SchemaClosureService(source_provider=provider).validate(consumer)
+        SchemaClosureService(CONFIG, source_provider=provider).validate(consumer)
 
 
 def test_unknown_absolute_identifier_names_uri_and_referring_file(tmp_path: Path) -> None:
@@ -849,7 +872,7 @@ def test_unknown_absolute_identifier_names_uri_and_referring_file(tmp_path: Path
         ReferenceError,
         match="'https://primitives.example/missing' in specs/schemas/owned.schema.yaml",
     ):
-        SchemaClosureService(source_provider=provider).validate(consumer)
+        SchemaClosureService(CONFIG, source_provider=provider).validate(consumer)
 
 
 def test_dependencies_mapping_one_identifier_to_different_bytes_fail(tmp_path: Path) -> None:
@@ -869,7 +892,7 @@ resources:
     )
 
     with pytest.raises(ReferenceError, match="shared and primitives map .* to different bytes"):
-        SchemaClosureService(source_provider=provider).validate(consumer)
+        SchemaClosureService(CONFIG, source_provider=provider).validate(consumer)
 
 
 def test_owned_and_materialized_identifier_with_different_bytes_fails(tmp_path: Path) -> None:
@@ -877,7 +900,7 @@ def test_owned_and_materialized_identifier_with_different_bytes_fails(tmp_path: 
     write_tree(consumer, {"specs/schemas/label.schema.yaml": f"$id: {LABEL}\ntype: integer\n"})
 
     with pytest.raises(RegistryError, match="duplicate \\$id 'https://primitives.example/label'"):
-        SchemaClosureService(source_provider=provider).validate(consumer)
+        SchemaClosureService(CONFIG, source_provider=provider).validate(consumer)
 
 
 def make_parent_with_resource_child(tmp_path: Path, child_label: str) -> Path:
@@ -887,7 +910,10 @@ def make_parent_with_resource_child(tmp_path: Path, child_label: str) -> Path:
         {
             "specs/schemas/parent.schema.yaml": concrete_schema("parent:owned@1"),
             "specs/schemas/label.schema.yaml": f"$id: {LABEL}\ntype: string\n",
-            "specs/schema-resources.yml": """_schema: kleisis:schema-resources@2
+            "kleisis.yml": """_schema: kleisis:configuration@1
+paths:
+  owned_schemas: specs/schemas
+  registry: specs/schema-registry.yml
 exports: [parent:owned@1]
 projects:
   - path: projects/child
@@ -916,7 +942,7 @@ resources:
 def test_composite_registry_imports_child_resources(tmp_path: Path) -> None:
     root = make_parent_with_resource_child(tmp_path, f"$id: {LABEL}\ntype: string\n")
 
-    candidate = SchemaClosureService().build(root)
+    candidate = SchemaClosureService(CONFIG).build(root)
     try:
         assert {uri: path.as_posix() for uri, path in candidate.registry.resources.items()} == {
             LABEL: "specs/schemas/label.schema.yaml",
@@ -930,7 +956,7 @@ def test_composite_registry_rejects_child_resource_with_different_bytes(tmp_path
     root = make_parent_with_resource_child(tmp_path, f"$id: {LABEL}\ntype: integer\n")
 
     with pytest.raises(RegistryError, match="duplicate \\$id 'https://primitives.example/label'"):
-        SchemaClosureService().validate(root)
+        SchemaClosureService(CONFIG).validate(root)
 
 
 def make_resource_only(
@@ -965,7 +991,10 @@ def make_resource_only(
             "specs/schemas/owned.schema.yaml": concrete_schema(
                 "consumer:owned@1", reference=owned_reference
             ),
-            "specs/schema-resources.yml": f"""_schema: kleisis:schema-resources@2
+            "kleisis.yml": f"""_schema: kleisis:configuration@1
+paths:
+  owned_schemas: specs/schemas
+  registry: specs/schema-registry.yml
 exports: [consumer:owned@1]
 dependencies:
   - id: primitives
@@ -979,7 +1008,7 @@ dependencies:
 
 def test_resource_only_dependency_serves_an_absolute_reference(tmp_path: Path) -> None:
     consumer, provider = make_resource_only(tmp_path, f"{LABEL}#/$defs/text")
-    service = SchemaClosureService(source_provider=provider)
+    service = SchemaClosureService(CONFIG, source_provider=provider)
 
     service.materialize(consumer)
 
@@ -1001,7 +1030,7 @@ def test_resource_only_dependency_with_version_1_registry_fails(tmp_path: Path) 
     with pytest.raises(
         RegistryError, match="dependency primitives selects no contract, and its registry of"
     ):
-        SchemaClosureService(source_provider=provider).validate(consumer)
+        SchemaClosureService(CONFIG, source_provider=provider).validate(consumer)
 
 
 def test_unused_resource_only_dependency_fails(tmp_path: Path) -> None:
@@ -1010,7 +1039,7 @@ def test_unused_resource_only_dependency_fails(tmp_path: Path) -> None:
     with pytest.raises(
         RegistryError, match="dependency primitives selects no contract, and no reference"
     ):
-        SchemaClosureService(source_provider=provider).validate(consumer)
+        SchemaClosureService(CONFIG, source_provider=provider).validate(consumer)
 
 
 ROOTED = "/specs/schemas/defs.schema.yaml"
@@ -1030,7 +1059,7 @@ def make_rooted_consumer(tmp_path: Path, export_reference: str | None) -> Path:
             ),
             "specs/schemas/defs.schema.yaml": "type: string\n",
             "specs/schemas/support.schema.yaml": f"$ref: {ROOTED}\n",
-            "specs/schema-resources.yml": f"{RECORD_MARKER}exports: [consumer:owned@1]\n",
+            "kleisis.yml": f"{RECORD_MARKER}exports: [consumer:owned@1]\n",
         },
     )
 
@@ -1038,7 +1067,7 @@ def make_rooted_consumer(tmp_path: Path, export_reference: str | None) -> Path:
 def test_vault_rooted_reference_outside_every_export_closure_is_admitted(
     tmp_path: Path,
 ) -> None:
-    SchemaClosureService().validate(make_rooted_consumer(tmp_path, None))
+    SchemaClosureService(CONFIG).validate(make_rooted_consumer(tmp_path, None))
 
 
 def test_vault_rooted_reference_in_an_export_closure_fails(tmp_path: Path) -> None:
@@ -1048,7 +1077,7 @@ def test_vault_rooted_reference_in_an_export_closure_fails(tmp_path: Path) -> No
         ReferenceError,
         match=f"'{ROOTED}' in specs/schemas/owned.schema.yaml .* absolute \\$id",
     ):
-        SchemaClosureService().validate(consumer)
+        SchemaClosureService(CONFIG).validate(consumer)
 
 
 def test_vault_rooted_reference_in_a_materialized_file_fails(tmp_path: Path) -> None:
@@ -1063,7 +1092,7 @@ def test_vault_rooted_reference_in_a_materialized_file_fails(tmp_path: Path) -> 
         match="'/schemas/text.schema.yaml' in schemas/note.schema.yaml in dependency "
         "primitives .* absolute \\$id",
     ):
-        SchemaClosureService(source_provider=provider).validate(consumer)
+        SchemaClosureService(CONFIG, source_provider=provider).validate(consumer)
 
 
 def test_vault_rooted_reference_in_a_child_export_closure_fails(tmp_path: Path) -> None:
@@ -1071,7 +1100,10 @@ def test_vault_rooted_reference_in_a_child_export_closure_fails(tmp_path: Path) 
         tmp_path / "parent",
         {
             "specs/schemas/parent.schema.yaml": concrete_schema("parent:owned@1"),
-            "specs/schema-resources.yml": """_schema: kleisis:schema-resources@2
+            "kleisis.yml": """_schema: kleisis:configuration@1
+paths:
+  owned_schemas: specs/schemas
+  registry: specs/schema-registry.yml
 exports: [parent:owned@1]
 projects:
   - path: projects/child
@@ -1095,4 +1127,4 @@ resources: {}
     with pytest.raises(
         ReferenceError, match=f"'{ROOTED}' in specs/schemas/child.schema.yaml .* absolute \\$id"
     ):
-        SchemaClosureService().validate(root)
+        SchemaClosureService(CONFIG).validate(root)

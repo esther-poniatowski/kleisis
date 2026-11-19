@@ -10,5 +10,8 @@ dependencies:
   - mypy>=1.13,<2
   - ruff>=0.8,<1
   - types-pyyaml>=6,<7
+  # Sibling tools, pinned by commit; pip installs a Git reference, which a conda dependency cannot
+  # name.
   - pip:
+      - hodegos @ git+https://github.com/esther-poniatowski/hodegos.git@e61d0d97eaa80cc0cfdd90c3022c1e3916ef1ad9
       - -e .

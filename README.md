@@ -2,14 +2,14 @@
 
 Kleisis is a deterministic schema-closure materializer. It lets a consumer repository reproduce a local set of schema contracts. That local set contains owned files and exact external files. A relative `$ref` connects files from the directory of its containing schema. An absolute `$ref` connects files by the `$id` that they declare, including files of another declared dependency. Finally, the generated registry maps each contract identifier and each absolute `$id` to one file.
 
-Runtime consumers need only these local files. To reproduce the same state, the resource record fixes each external source by a full Git commit or an artifact digest.
+Runtime consumers need only these local files. To reproduce the same state, the configuration `kleisis.yml` fixes each external source by a full Git commit or an artifact digest.
 
 ## Prerequisites
 
 Running Kleisis requires Git and Conda. Before the first command, the consumer repository must also contain:
 
 - owned concrete schemas under the configured schema directory;
-- the resource record at the default path `specs/schema-resources.yml`;
+- the configuration `kleisis.yml`, in one of the places described in [Configuration](#configuration);
 - required child repositories at their declared paths;
 - generated registries and materialized dependency closures for those child repositories.
 
@@ -23,19 +23,23 @@ Conda reads the file `environment.yml` to install the command and its developmen
 conda env create --solver libmamba -f environment.yml
 ```
 
-## Resource record
+## Configuration
 
-The resource record governs four inputs:
+The configuration `kleisis.yml` records the resources of the consumer, and governs four inputs:
 
 - repository paths;
 - owned exports;
 - exact external dependencies;
 - declared child projects.
 
-This record template uses the conventional paths and selects one contract from an exact Git state. Replace the example commit with the required source commit:
+This template declares the two required paths and selects one contract from an exact Git state. Replace the example paths with those of the consumer, and the example commit with the required source commit:
 
 ```yaml
-_schema: kleisis:schema-resources@2
+_schema: kleisis:configuration@1
+
+paths:
+  owned_schemas: specs/schemas
+  registry: specs/schema-registry.yml
 
 exports:
   - mixture:question@1
@@ -54,13 +58,28 @@ dependencies:
       - geonexus:project@1
 ```
 
-The record declares its format in its first key, `_schema: kleisis:schema-resources@2`. A record without this key, with another value, or with the retired key `format_version` stops each command with status 2, and the message names the value to write.
+The configuration declares its format in its key `_schema: kleisis:configuration@1`. A configuration without this key, with another value, or with the retired key `format_version` stops each command with status 2, and the message names the value to write. The [schema of the configuration](specs/schemas/configuration.schema.json) publishes the format under an absolute `$id`.
 
-Format 2 moved the default resource directory from `.schema-resources` into the state folder `.kleisis/`. A record of format 1 that omits `paths.resources` would therefore be read at another place, so the format raised its major number. To upgrade a record of format 1, write `_schema: kleisis:schema-resources@2`; to keep the former resource directory, also write `paths.resources: .schema-resources`.
+Kleisis finds the configuration through [Hodegos](https://github.com/esther-poniatowski/hodegos), in one of three places below the root: `kleisis.yml`, `.config/kleisis.yml`, or `kleisis.yml` in a folder that the declaration `hodegos.yml` of the root lists. A consumer that keeps the configurations of its tools in `config/tools/` declares that folder once:
+
+```yaml
+# hodegos.yml, at the root of the consumer
+_schema: hodegos:configuration@1
+folders:
+  - config/tools
+```
+
+The configuration replaces the former resource record `specs/schema-resources.yml`, of format `kleisis:schema-resources@2`. Kleisis now assumes no folder of the consumer, so an upgraded record declares its two paths. The upgrade takes three edits:
+
+- move the file to one of the three places;
+- write `_schema: kleisis:configuration@1`;
+- write `paths.owned_schemas` and `paths.registry`, whose former defaults were `specs/schemas` and `specs/schema-registry.yml`.
+
+A record of format 1 kept its resources in `.schema-resources`. To keep that folder, the upgraded record also writes `paths.resources: .schema-resources`.
 
 Each dependency identifier uses lower kebab-case. Each Git source uses a web address that starts with `https://`, contains no authentication data and names a full lowercase commit. Instead, an artifact source declares a web address that starts with `https://` and contains no authentication data. The artifact source also declares its source commit and a 256-bit digest.
 
-A private Git source can also name one variable through the optional field `credential_env`. The variable must contain the complete `Authorization` header. The resource record and receipt store only the variable name.
+A private Git source can also name one variable through the optional field `credential_env`. The variable must contain the complete `Authorization` header. The configuration and the receipt store only the variable name.
 
 Git sends the value with each request. For a GitHub repository, the header names the `Basic` scheme and encodes a token as password:
 
@@ -89,12 +108,12 @@ A vault-rooted `$ref`, which starts with `/`, is resolved by Ekphrasis from the 
 
 Tar archives contribute regular files and directories only. A link with a valid member path is omitted, while an invalid member path still invalidates the archive. Retained ZIP artifacts reject symbolic links. Therefore, a selected registry or schema supplied only through a link remains absent and fails validation.
 
-The optional key `paths` overrides four repository-relative paths. The values below are the defaults:
+The key `paths` names four repository-relative paths. The folder of the owned schemas and the registry are content of the consumer, so the configuration must declare them. The two others hold the state of Kleisis, and take the defaults below:
 
 ```yaml
 paths:
-  owned_schemas: specs/schemas
-  registry: specs/schema-registry.yml
+  owned_schemas: specs/schemas          # required
+  registry: specs/schema-registry.yml   # required
   state: .kleisis
   resources: .kleisis/resources
 ```
@@ -105,7 +124,7 @@ Keep the state folder and the resource directory disjoint from these source and 
 
 - the owned schema directory;
 - the generated registry;
-- the resource record;
+- the configuration;
 - each declared child checkout.
 
 The resource directory may lie inside the state folder, but must not contain it or equal it: a publication replaces the resource directory, and the journal of that publication lies in the state folder.
@@ -128,11 +147,11 @@ The three commands keep writes separate from checks:
 - The materialization command `kleisis materialize --root .` replaces both generated outputs. If either write fails, the command attempts to restore both outputs immediately. If the command cannot restore them, it retains its journal in the state folder so a later run can recover them.
 - The check command `kleisis check --root .` rematerializes in an isolated directory and fails when either generated output differs.
 
-Each command works on one root, the consumer repository. The root is named by the option `-r`, `--root`, or else by the environment variable `KLEISIS_ROOT`, or else is the current folder. Kleisis reads no configuration file of its own, so it never searches the ancestors of the current folder. A root that is not a folder is a usage error.
+Each command works on one root, the consumer repository. The root is named by the option `-r`, `--root`, or else by the environment variable `KLEISIS_ROOT`. Otherwise, the root is the nearest folder, from the current folder upward, that holds the configuration in one of its places, or else the current folder. Therefore, a command runs from any subfolder of the consumer. A root that is not a folder is a usage error.
 
-Each command accepts the option `--record PATH` when the resource record does not lie at its default path `specs/schema-resources.yml` below the root. The path is read from the current folder, and must lie below the root.
+The option `-c`, `--config PATH` names a configuration that lies outside its three places. Kleisis reads the path from the current folder. The path must lie below the root, since the configuration names the outputs of the root.
 
-The exit status is 0 on success, 1 when the build, the validation or the check fails, and 2 on a usage error, on a resource record that is absent, unreadable or invalid, or when the SARIF log cannot be written. A resource record is the configuration of a command, so each of its faults, its format included, gives status 2. The option `-v`, `--version` prints the version.
+The exit status is 0 on success, and 1 when the build, the validation or the check fails. The status is 2 on a usage error, on an absent, unreadable or invalid configuration, and on a SARIF log that cannot be written. Each fault of the configuration, its format included, gives status 2. The option `-v`, `--version` prints the version.
 
 The commands `validate` and `check` also accept the option `--format sarif`. The command then writes a SARIF 2.1.0 log on standard output, in the findings profile of the gate Elenchos. The build stops at its first failure, so the log holds one result for that failure, or one per item when the failure lists several; `check` adds one result per generated output that differs. A successful run yields a log without result. The line on standard error and the exit status stay unchanged.
 
@@ -179,7 +198,7 @@ The generated registry declares `_schema: kleisis:schema-registry@2` as its firs
 
 The key `resources` covers every owned or materialized schema file whose root declares an absolute `$id`, which starts with a URI scheme. Two files may declare one `$id` only with identical bytes. A consumer cannot regenerate the registry of a dependency or a child repository, so Kleisis also reads two legacy forms there: `schema_version: 1`, without the key `resources`, and `schema_version: 2`, with it. An absent `resources` reads as an empty map. Any other value, both keys together, or neither key fails the command. A legacy registry of the consumer itself differs from a fresh build, so `check` reports it as drift and `materialize` rewrites it. The [closure across sources](docs/adr/closure-across-sources.md) records this format. The [schema of the registry](specs/schemas/schema-registry.schema.json) publishes it under an absolute `$id`, and [its cases](specs/cases/registries.yml) fix the verdict of a reader on each form.
 
-An owned contract uses the root path `properties.<binding>.const` to state its identifier, where `<binding>` is the binding of the resource record, `_schema` by default. Its root `required` list must also name the binding. The resource record must export every contract with both entries. A file with neither entry remains an owned support schema. The support schema can still serve a `$ref`. A file with only one entry or an invalid value fails the command.
+An owned contract uses the root path `properties.<binding>.const` to state its identifier, where `<binding>` is the binding of the configuration, `_schema` by default. Its root `required` list must also name the binding. The resource record must export every contract with both entries. A file with neither entry remains an owned support schema. The support schema can still serve a `$ref`. A file with only one entry or an invalid value fails the command.
 
 ## Child projects
 

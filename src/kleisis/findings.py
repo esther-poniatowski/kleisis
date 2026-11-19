@@ -22,9 +22,9 @@ class Rule:
     description: str
 
 
-RECORD_UNREADABLE = Rule("record/unreadable", "The resource record cannot be read or parsed.")
+RECORD_UNREADABLE = Rule("record/unreadable", "The configuration file cannot be read or parsed.")
 RECORD_INVALID = Rule(
-    "record/invalid", "A field of the resource record violates its declared structure."
+    "record/invalid", "A field of the configuration file violates its declared structure."
 )
 RECORD_PATH_OVERLAP = Rule(
     "record/path-overlap",

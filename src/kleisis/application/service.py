@@ -59,7 +59,6 @@ _STAGE_NAME = re.compile(rf"{re.escape(_STATE_STAGE_PREFIX)}[a-z0-9_]{{8}}")
 """The name of a stage in the state folder: the prefix and the 8 characters of ``mkdtemp``."""
 _SHARED_STAGE_PREFIX = "kleisis-stage-"
 """The prefix of a stage in a folder shared with other tools, such as the temporary folder."""
-_DEFAULT_RECORD = PurePosixPath("specs/schema-resources.yml")
 
 
 @dataclass(frozen=True)
@@ -135,7 +134,7 @@ class SchemaClosureService:
 
     def __init__(
         self,
-        record_path: PurePosixPath = _DEFAULT_RECORD,
+        record_path: PurePosixPath,
         source_provider: SourceProvider | None = None,
     ):
         self.record_path = record_path

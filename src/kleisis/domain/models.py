@@ -86,15 +86,15 @@ FORMER_RESOURCES = PurePosixPath(".schema-resources")
 
 @dataclass(frozen=True)
 class Paths:
-    """Repository paths controlled by the resource record.
+    """Repository paths controlled by the configuration.
 
-    The state folder holds what Kleisis alone reads: the resources folder by default, the
-    publication journal and its backups. The defaults are those of a record that declares no
-    path.
+    The configuration must declare the folder of the owned schemas and the registry, which are
+    content of the consumer. The state folder holds what Kleisis alone reads: the resources folder
+    by default, the publication journal and its backups.
     """
 
-    owned_schemas: PurePosixPath = PurePosixPath("specs/schemas")
-    registry: PurePosixPath = PurePosixPath("specs/schema-registry.yml")
+    owned_schemas: PurePosixPath
+    registry: PurePosixPath
     resources: PurePosixPath = DEFAULT_STATE / RESOURCES_IN_STATE
     state: PurePosixPath = DEFAULT_STATE
 
@@ -147,13 +147,8 @@ class Project:
 
 @dataclass(frozen=True)
 class ResourceRecord:
-    """The complete source declaration for one consumer repository.
+    """The complete source declaration for one consumer repository, read from `kleisis.yml`."""
 
-    ``format_version`` holds the major version of the format ``kleisis:schema-resources``
-    that the record declares in its key ``_schema``.
-    """
-
-    format_version: int
     paths: Paths
     schemas: SchemaConvention = DEFAULT_CONVENTION
     exports: tuple[str, ...] = ()

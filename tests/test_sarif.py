@@ -40,8 +40,11 @@ from kleisis.findings import (
 )
 from kleisis.sarif import sarif_log
 
+CONFIG = PurePosixPath("kleisis.yml")
+"""The configuration of the consumer in each test tree."""
+
 VECTORS = Path(__file__).parent / "fixtures/elenchos"
-RECORD = "path:specs/schema-resources.yml"
+RECORD = "path:kleisis.yml"
 OWNED = "path:specs/schemas/owned.schema.yaml"
 
 
@@ -124,9 +127,9 @@ def record_only(text: str, *, owned: bool = True) -> Scenario:
 
     def build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         del monkeypatch
-        root = write_tree(tmp_path / "consumer", {"specs/schema-resources.yml": text})
+        root = write_tree(tmp_path / "consumer", {"kleisis.yml": text})
         if owned:
-            (root / "specs/schemas").mkdir()
+            (root / "specs/schemas").mkdir(parents=True)
         return root
 
     return build
@@ -140,7 +143,7 @@ def owned_tree(files: dict[str, str], exports: str = "[consumer:owned@1]") -> Sc
         return write_tree(
             tmp_path / "consumer",
             {
-                "specs/schema-resources.yml": f"{RECORD_MARKER}exports: {exports}\n",
+                "kleisis.yml": f"{RECORD_MARKER}exports: {exports}\n",
                 **{f"specs/schemas/{name}": text for name, text in files.items()},
             },
         )
@@ -229,7 +232,7 @@ def primitives_contract_renamed(tests: Path, consumer: Path) -> None:
 def shared_contract_unprovided(tests: Path, consumer: Path) -> None:
     del tests
     replace_in(
-        consumer / "specs/schema-resources.yml",
+        consumer / "kleisis.yml",
         "contracts: [shared:main@1]",
         "contracts: [shared:main@1, shared:absent@1]",
     )
@@ -268,7 +271,7 @@ def owned_label_differs(tests: Path, consumer: Path) -> None:
 
 def child_shares_other_bytes(tests: Path, consumer: Path) -> None:
     del tests
-    with (consumer / "specs/schema-resources.yml").open("a", encoding="utf-8") as record:
+    with (consumer / "kleisis.yml").open("a", encoding="utf-8") as record:
         record.write("projects:\n  - path: projects/child\n")
     write_tree(
         consumer / "projects/child",
@@ -292,7 +295,10 @@ def child_with_missing_dependency(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         tmp_path / "parent",
         {
             "specs/schemas/parent.schema.yaml": concrete_schema("parent:owned@1"),
-            "specs/schema-resources.yml": """_schema: kleisis:schema-resources@2
+            "kleisis.yml": """_schema: kleisis:configuration@1
+paths:
+  owned_schemas: specs/schemas
+  registry: specs/schema-registry.yml
 exports: [parent:owned@1]
 projects:
   - path: projects/child
@@ -309,7 +315,7 @@ resources: {}
     )
 
 
-CONSUMER_RECORD = "_schema: kleisis:schema-resources@2\nexports: [consumer:owned@1]\n"
+CONSUMER_RECORD = RECORD_MARKER + "exports: [consumer:owned@1]\n"
 #: Rules of a fault in the resource record, the configuration of the command: status 2.
 RECORD_RULES = {"record/unreadable", "record/invalid", "record/path-overlap", "path/escape"}
 SCENARIOS: dict[str, tuple[Scenario, list[str]]] = {
@@ -322,15 +328,21 @@ SCENARIOS: dict[str, tuple[Scenario, list[str]]] = {
         [f"kleisis|record/invalid|{RECORD}|/exports"],
     ),
     "record/path-overlap": (
-        record_only("_schema: kleisis:schema-resources@2\npaths:\n  resources: specs\n"),
+        record_only(RECORD_MARKER + "  resources: specs\n"),
         [f"kleisis|record/path-overlap|{RECORD}|/paths/resources|specs/schemas"],
     ),
     "path/escape": (
-        record_only("_schema: kleisis:schema-resources@2\npaths:\n  owned_schemas: ../outside\n"),
+        record_only(
+            "_schema: kleisis:configuration@1\npaths:\n  owned_schemas: ../outside\n"
+            "  registry: specs/schema-registry.yml\n"
+        ),
         [f"kleisis|path/escape|{RECORD}|/paths/owned_schemas"],
     ),
     "path/absent": (
-        record_only("_schema: kleisis:schema-resources@2\n", owned=False),
+        record_only(
+            RECORD_MARKER,
+            owned=False,
+        ),
         [f"kleisis|path/absent|{RECORD}|/paths/owned_schemas"],
     ),
     "source/unavailable": (
@@ -502,7 +514,7 @@ def test_drift_of_each_output_yields_its_own_result(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     consumer = two_sources(NOTE)(tmp_path, monkeypatch)
-    SchemaClosureService().materialize(consumer)
+    SchemaClosureService(CONFIG).materialize(consumer)
     (consumer / ".kleisis/resources/shared/schemas/main.schema.yaml").write_text(
         "# drift\n", encoding="utf-8"
     )
@@ -529,7 +541,7 @@ def test_absent_registry_is_drift(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     consumer = two_sources(NOTE)(tmp_path, monkeypatch)
-    SchemaClosureService().materialize(consumer)
+    SchemaClosureService(CONFIG).materialize(consumer)
     (consumer / "specs/schema-registry.yml").unlink()
 
     status, log = run_sarif(capsys, "check", consumer)
@@ -546,6 +558,7 @@ def test_filesystem_failure_declares_a_failed_run_without_result(
         raise OSError("planted failure")
 
     monkeypatch.setattr(SchemaClosureService, "validate", fail)
+    (tmp_path / "kleisis.yml").write_text(RECORD_MARKER, encoding="utf-8")
 
     status = run_main(["validate", "--root", str(tmp_path), "--format", "sarif"])
 
@@ -566,7 +579,7 @@ def test_clean_run_yields_a_log_without_result(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     consumer = two_sources(NOTE)(tmp_path, monkeypatch)
-    SchemaClosureService().materialize(consumer)
+    SchemaClosureService(CONFIG).materialize(consumer)
 
     status, log = run_sarif(capsys, command, consumer)
 
@@ -681,9 +694,32 @@ def test_root_is_read_from_the_environment_then_overridden_by_the_option(
     assert run_main(["validate"]) == 1
     assert "schema target is not a regular source file" in capsys.readouterr().err
 
-    # Without a resource record the command has no configuration, which is a status-2 error.
+    # Without a configuration, the command stops with a usage error that names the file.
     assert run_main(["validate", "--root", str(elsewhere)]) == 2
-    assert "schema-resources.yml" in capsys.readouterr().err
+    assert "write kleisis.yml at the root" in capsys.readouterr().err
+
+
+def test_configuration_is_found_through_hodegos(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = owned_tree({"owned.schema.yaml": concrete_schema("consumer:owned@1")})(
+        tmp_path, monkeypatch
+    )
+    (root / "config/tools").mkdir(parents=True)
+    (root / "kleisis.yml").rename(root / "config/tools/kleisis.yml")
+    (root / "hodegos.yml").write_text(
+        "_schema: hodegos:configuration@1\nfolders: [config/tools]\n", encoding="utf-8"
+    )
+    monkeypatch.delenv("KLEISIS_ROOT", raising=False)
+    monkeypatch.chdir(root / "specs/schemas")
+
+    # The root is the nearest folder that declares the folder holding the configuration.
+    assert run_main(["validate"]) == 0
+
+    # Without the declaration, no place of the root holds the configuration.
+    (root / "hodegos.yml").unlink()
+    assert run_main(["validate"]) == 2
+    assert "no configuration" in capsys.readouterr().err
 
 
 def test_root_that_is_not_a_folder_is_a_usage_error(
@@ -695,30 +731,30 @@ def test_root_that_is_not_a_folder_is_a_usage_error(
     assert "is not a folder" in capsys.readouterr().err
 
 
-def test_record_option_is_read_from_the_current_folder(
+def test_config_option_is_read_from_the_current_folder(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = owned_reference("missing.schema.yaml")(tmp_path, monkeypatch)
     monkeypatch.chdir(root / "specs")
 
-    # The record is read, so the run reaches the unresolved reference of the owned schema.
-    assert run_main(["validate", "--root", str(root), "--record", "schema-resources.yml"]) == 1
+    # The configuration is read, so the run reaches the unresolved reference of the owned schema.
+    assert run_main(["validate", "--root", str(root), "--config", "../kleisis.yml"]) == 1
     assert "schema target is not a regular source file" in capsys.readouterr().err
 
-    # A path relative to the root is no longer read: from `specs/`, it names a missing file.
-    status = run_main(["validate", "--root", str(root), "--record", "specs/schema-resources.yml"])
+    # A path relative to the root is not read: from `specs/`, it names a missing file.
+    status = run_main(["validate", "--root", str(root), "--config", "kleisis.yml"])
     assert status == 2
-    assert "specs/specs/schema-resources.yml" in capsys.readouterr().err
+    assert "specs/kleisis.yml" in capsys.readouterr().err
 
 
-def test_record_outside_the_root_is_a_usage_error(
+def test_config_outside_the_root_is_a_usage_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = owned_reference("missing.schema.yaml")(tmp_path, monkeypatch)
     outside = tmp_path / "outside.yml"
     outside.write_text("", encoding="utf-8")
 
-    assert run_main(["validate", "--root", str(root), "--record", str(outside)]) == 2
+    assert run_main(["validate", "--root", str(root), "--config", str(outside)]) == 2
     assert "lies outside the root" in capsys.readouterr().err
 
 
@@ -745,7 +781,7 @@ def test_record_without_its_format_identifier_stops_with_status_2(
     assert log_violations(log) == []
     assert identities(log) == [f"kleisis|record/invalid|{RECORD}|{locus}"]
     assert run_main(["validate", "--root", str(root)]) == 2
-    assert "_schema: kleisis:schema-resources@2" in capsys.readouterr().err
+    assert "_schema: kleisis:configuration@1" in capsys.readouterr().err
 
 
 def test_every_scenario_rule_and_every_catalogued_rule_agree() -> None:
@@ -801,7 +837,7 @@ def test_segments_convert_as_the_examples_of_the_profile() -> None:
 
 def test_subject_outside_the_repository_falls_back_to_the_root() -> None:
     rule = Rule("example/key", "An example.")
-    record = PurePosixPath("specs/schema-resources.yml")
+    record = PurePosixPath("kleisis.yml")
 
     assert complete(Finding(rule, "a"), record).subject == record
     escaped = complete(Finding(rule, "b", PurePosixPath("../elsewhere.yml")), record)
