@@ -18,6 +18,8 @@ from kleisis.application.materialization import (
     receipt_bytes,
 )
 from kleisis.application.ports import SourceProvider
+from kleisis.domain.documents import load_document
+from kleisis.domain.keywords import used_keywords
 from kleisis.domain.models import (
     FORMER_RESOURCES,
     MaterializedDependency,
@@ -25,8 +27,6 @@ from kleisis.domain.models import (
     ResourceRecord,
     resolve_inside,
 )
-from kleisis.domain.documents import load_document
-from kleisis.domain.keywords import used_keywords
 from kleisis.domain.records import load_resource_record
 from kleisis.domain.references import SchemaSource, source_closure
 from kleisis.domain.registry import (

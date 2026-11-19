@@ -70,7 +70,8 @@ KEYWORD_DUPLICATE = Rule(
 )
 KEYWORD_UNDECLARED = Rule(
     "keyword/undeclared",
-    "An owned schema uses an `x-` keyword that neither the configuration nor a dependency declares.",
+    "An owned schema uses an `x-` keyword declared neither by the configuration nor by a "
+    "dependency.",
 )
 DEPENDENCY_NO_RESOURCES = Rule(
     "dependency/no-resources",
