@@ -9,7 +9,10 @@ description = "Deterministic schema-closure materializer"
 requires-python = ">=3.12"
 license = "GPL-3.0-or-later"
 authors = [{name = "Esther Poniatowski", email = "esther.poniatowski@ens.psl.eu"}]
-dependencies = ["hodegos>=0.0,<1", "PyYAML>=6.0,<7"]
+dependencies = [
+    "hodegos @ git+https://github.com/esther-poniatowski/hodegos.git@e61d0d97eaa80cc0cfdd90c3022c1e3916ef1ad9",
+    "PyYAML>=6.0,<7",
+]
 
 [project.scripts]
 kleisis = "kleisis.cli:main"

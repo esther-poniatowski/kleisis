@@ -23,10 +23,9 @@ Two further functions check a contract identifier `<namespace>:<name>@<version>`
 
 Each `RegistryError` carries the rule that the Python reader names in its finding:
 
-- `registry/invalid`: the file cannot be read as YAML, or it violates the registry format;
+- `registry/invalid`: the file cannot be read as YAML, it violates the registry format, or a path is not a non-empty string;
 - `contract/identifier`: a key of `schemas` or an entry of `exports` departs from the grammar of a contract identifier;
-- `path/escape`: a path is absolute, holds a segment `..`, or names the root of the repository;
-- `record/invalid`: a path is not a non-empty string.
+- `path/escape`: a path is absolute, holds a segment `..`, or names the root of the repository.
 
 The package parses YAML as PyYAML parses it: in YAML 1.1, without duplicate keys or merge keys `<<`. For example, a plain `yes` is a boolean, whereas a plain `y` or `1e3` is a string. Both readers pass the conformance cases of [`specs/cases/registries.yml`](../../specs/cases/registries.yml) and [`specs/cases/contract-identifiers.yml`](../../specs/cases/contract-identifiers.yml).
 

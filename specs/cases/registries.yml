@@ -194,6 +194,26 @@ cases:
       schemas: {tool:base@1: schemas/../../base.schema.yaml}
     expect: {error: path/escape}
 
+  - name: schemas-path-not-a-string
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {tool:base@1: 5}
+    expect: {error: registry/invalid}
+
+  - name: schemas-path-blank
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {tool:base@1: " "}
+    expect: {error: registry/invalid}
+
+  - name: malformed-tagged-scalar
+    description: a tagged scalar that its tag cannot construct makes the file unreadable
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {}
+      exports: !!bool maybe
+    expect: {error: registry/invalid}
+
   # --- exports -------------------------------------------------------------------------------------
 
   - name: exports-not-a-list

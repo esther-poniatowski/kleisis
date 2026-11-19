@@ -27,6 +27,7 @@ from kleisis.findings import (
     CONTRACT_DUPLICATE,
     CONTRACT_IDENTIFIER,
     PATH_ABSENT,
+    PATH_ESCAPE,
     REGISTRY_INVALID,
     RESOURCES_CONFLICTING_BYTES,
     SCHEMA_UNREADABLE,
@@ -58,6 +59,12 @@ def _load_mapping(path: Path, rule: Rule) -> dict[str, Any]:
         value = load_document(path)
     except (OSError, TypeError, ValueError, yaml.YAMLError) as exc:
         raise RegistryError(f"cannot read {path}: {exc}", rule=rule, subject=path) from exc
+    except (KeyError, IndexError) as exc:
+        # The constructors of PyYAML raise these on a malformed tagged scalar, such as
+        # `!!bool maybe`, instead of a YAMLError.
+        raise RegistryError(
+            f"cannot read {path}: malformed tagged scalar ({exc!r})", rule=rule, subject=path
+        ) from exc
     if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
         raise RegistryError(f"{path} must contain a mapping", rule=rule, subject=path)
     return cast(dict[str, Any], value)
@@ -175,9 +182,11 @@ def _registry_paths(path: Path, value: object, field_name: str) -> dict[str, Pur
         try:
             result[key] = safe_relative_path(target, f"{field_name}[{key!r}]")
         except SchemaClosureError as exc:
+            # An escape keeps its rule; any other fault of a path is a fault of the registry.
+            rule = exc.findings[0].rule
             raise RegistryError(
                 str(exc),
-                rule=exc.findings[0].rule,
+                rule=rule if rule is PATH_ESCAPE else REGISTRY_INVALID,
                 subject=path,
                 locus=pointer(field_name, key),
             ) from exc
