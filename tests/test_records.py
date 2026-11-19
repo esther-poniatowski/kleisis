@@ -289,3 +289,24 @@ dependencies:
 """,
             )
         )
+
+
+@pytest.mark.parametrize(
+    ("body", "locus"),
+    [
+        ("exports: [Consumer:owned@1]\n", "/exports/0"),
+        (
+            "dependencies:\n  - id: shared\n    source:\n      kind: git\n"
+            "      repository: https://example.org/shared.git\n"
+            f"      commit: {'a' * 40}\n"
+            "    registry: specs/schema-registry.yml\n    contracts: [shared:main]\n",
+            "/dependencies/0/contracts/0",
+        ),
+    ],
+)
+def test_a_contract_outside_the_grammar_is_rejected(tmp_path: Path, body: str, locus: str) -> None:
+    with pytest.raises(RecordError, match="no contract identifier") as caught:
+        load_resource_record(write_record(tmp_path, "_schema: kleisis:schema-resources@2\n" + body))
+    finding = caught.value.findings[0]
+    assert finding.rule.id == "contract/identifier"
+    assert finding.locus == locus

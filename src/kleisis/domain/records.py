@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 import yaml
 
+from kleisis.contracts import is_contract_identifier
 from kleisis.domain.documents import load_document
 from kleisis.domain.models import (
     DEFAULT_BINDING,
@@ -25,7 +26,7 @@ from kleisis.domain.models import (
     safe_relative_path,
 )
 from kleisis.errors import RecordError
-from kleisis.findings import RECORD_UNREADABLE, field_pointer, pointer
+from kleisis.findings import CONTRACT_IDENTIFIER, RECORD_UNREADABLE, field_pointer, pointer
 
 FORMAT_MAJOR = 2
 """The major version of the resource-record format that this release reads."""
@@ -78,6 +79,18 @@ def _nonempty_string(value: object, field_name: str) -> str:
             f"{field_name} must be a non-empty string", locus=field_pointer(field_name)
         )
     return value
+
+
+def _contract(value: object, field_name: str) -> str:
+    """Return a contract identifier, or raise naming its grammar."""
+    text = _nonempty_string(value, field_name)
+    if not is_contract_identifier(text):
+        raise RecordError(
+            f"{field_name} {text!r} is no contract identifier: write <namespace>:<name>@<version>",
+            rule=CONTRACT_IDENTIFIER,
+            locus=field_pointer(field_name),
+        )
+    return text
 
 
 def _commit(value: object, field_name: str) -> str:
@@ -168,7 +181,7 @@ def _resource_record(raw: object) -> ResourceRecord:
     schemas = _schema_convention(root.get("schemas", {}))
 
     exports = tuple(
-        _nonempty_string(item, f"exports[{index}]")
+        _contract(item, f"exports[{index}]")
         for index, item in enumerate(_sequence(root.get("exports"), "exports"))
     )
     if len(exports) != len(set(exports)):
@@ -284,7 +297,7 @@ def _resource_record(raw: object) -> ResourceRecord:
             )
 
         contracts = tuple(
-            _nonempty_string(contract, f"dependencies[{index}].contracts[{contract_index}]")
+            _contract(contract, f"dependencies[{index}].contracts[{contract_index}]")
             for contract_index, contract in enumerate(
                 _sequence(raw_dependency.get("contracts"), f"dependencies[{index}].contracts")
             )

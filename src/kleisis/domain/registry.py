@@ -9,6 +9,7 @@ from typing import Any, cast
 
 import yaml
 
+from kleisis.contracts import is_contract_identifier
 from kleisis.domain.documents import load_document
 from kleisis.domain.models import (
     DEFAULT_BINDING,
@@ -23,6 +24,7 @@ from kleisis.errors import RegistryError, SchemaClosureError
 from kleisis.findings import (
     CONTRACT_BINDING,
     CONTRACT_DUPLICATE,
+    CONTRACT_IDENTIFIER,
     PATH_ABSENT,
     REGISTRY_INVALID,
     RESOURCES_CONFLICTING_BYTES,
@@ -92,6 +94,14 @@ def schema_identifier(path: Path, binding: str = DEFAULT_BINDING) -> str | None:
         raise RegistryError(
             f"{path} has no non-empty properties.{binding}.const",
             rule=CONTRACT_BINDING,
+            subject=path,
+            locus=binding_locus(binding),
+        )
+    if not is_contract_identifier(identifier):
+        raise RegistryError(
+            f"{path} binds {identifier!r}, which is no contract identifier: "
+            "write <namespace>:<name>@<version>",
+            rule=CONTRACT_IDENTIFIER,
             subject=path,
             locus=binding_locus(binding),
         )
@@ -209,6 +219,19 @@ def _registry_version(path: Path, root: dict[str, Any]) -> tuple[int, set[str]]:
     return version, _LEGACY_REGISTRY_FIELDS[version]
 
 
+def _require_identifiers(path: Path, identifiers: Iterable[str], field_name: str) -> None:
+    """Reject the first key of ``schemas`` or entry of ``exports`` outside the grammar."""
+    for identifier in identifiers:
+        if not is_contract_identifier(identifier):
+            raise RegistryError(
+                f"{path} {field_name} holds {identifier!r}, which is no contract identifier: "
+                "write <namespace>:<name>@<version>",
+                rule=CONTRACT_IDENTIFIER,
+                subject=path,
+                locus=pointer(field_name),
+            )
+
+
 def load_registry(path: Path) -> Registry:
     """Load and validate a generated registry, in its current or its legacy format."""
     root = _load_mapping(path, REGISTRY_INVALID)
@@ -217,6 +240,7 @@ def load_registry(path: Path) -> Registry:
     if unknown:
         raise RegistryError(f"{path} contains unknown fields: {', '.join(unknown)}", subject=path)
     schemas = _registry_paths(path, root.get("schemas"), "schemas")
+    _require_identifiers(path, schemas, "schemas")
     raw_exports = root.get("exports", [])
     if not isinstance(raw_exports, list) or not all(
         isinstance(identifier, str) and identifier for identifier in raw_exports
@@ -227,6 +251,7 @@ def load_registry(path: Path) -> Registry:
             locus=pointer("exports"),
         )
     exports = tuple(cast(list[str], raw_exports))
+    _require_identifiers(path, exports, "exports")
     if len(exports) != len(set(exports)):
         raise RegistryError(
             f"{path} exports contains duplicates", subject=path, locus=pointer("exports")

@@ -361,6 +361,10 @@ SCENARIOS: dict[str, tuple[Scenario, list[str]]] = {
         owned_tree({"owned.schema.yaml": "type: object\nrequired: [_schema]\n"}, exports="[]"),
         [f"kleisis|contract/binding|{OWNED}|/properties/_schema"],
     ),
+    "contract/identifier": (
+        owned_tree({"owned.schema.yaml": concrete_schema("Consumer:owned@1")}, exports="[]"),
+        [f"kleisis|contract/identifier|{OWNED}|/properties/_schema/const"],
+    ),
     "contract/binding-mismatch": (
         two_sources(NOTE, primitives_contract_renamed),
         [

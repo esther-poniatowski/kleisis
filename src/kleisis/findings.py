@@ -45,6 +45,10 @@ SCHEMA_LINK = Rule(
 CONTRACT_BINDING = Rule(
     "contract/binding", "A schema declares an incomplete or invalid `_schema` binding."
 )
+CONTRACT_IDENTIFIER = Rule(
+    "contract/identifier",
+    "A contract identifier departs from the grammar `<namespace>:<name>@<version>`.",
+)
 CONTRACT_BINDING_MISMATCH = Rule(
     "contract/binding-mismatch",
     "A dependency registry maps a contract to a schema declaring another identifier.",
@@ -120,6 +124,7 @@ RULES: tuple[Rule, ...] = (
     SCHEMA_UNREADABLE,
     SCHEMA_LINK,
     CONTRACT_BINDING,
+    CONTRACT_IDENTIFIER,
     CONTRACT_BINDING_MISMATCH,
     CONTRACT_DUPLICATE,
     CONTRACT_UNEXPORTED,

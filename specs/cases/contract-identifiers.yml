@@ -1,0 +1,40 @@
+# Conformance cases of the grammar of a contract identifier.
+#
+# A reader that checks contract identifiers accepts every string of `valid` and rejects every string
+# of `invalid`. Kleisis runs these cases against its module `kleisis.contracts` and against the
+# pattern of `specs/schemas/contract-identifier.schema.json`.
+
+_schema: kleisis:cases@1
+
+valid:
+  - {identifier: "kleisis:schema-registry@2", note: a name of two words}
+  - {identifier: "geonexus:project@1", note: a name of one word}
+  - {identifier: "gnomon:view.next-act@8", note: a name of two words joined by a dot}
+  - {identifier: "gnomon:view.question-statements@3", note: a dotted name ending on a kebab word}
+  - {identifier: "a:b@1", note: words of one letter}
+  - {identifier: "tool2:item3@10", note: digits after the first letter, a version of two digits}
+  - {identifier: "my-tool:a.b.c@1", note: a hyphenated namespace and a name of three words}
+
+invalid:
+  - {identifier: "geonexus:project", note: the version is required}
+  - {identifier: "geonexus:project@0", note: the version is positive}
+  - {identifier: "geonexus:project@01", note: the version has no leading zero}
+  - {identifier: "geonexus:project@v1", note: the version holds digits only}
+  - {identifier: "Geonexus:project@1", note: the namespace is lowercase}
+  - {identifier: "geonexus:Project@1", note: the name is lowercase}
+  - {identifier: "geonexus:project_type@1", note: words are joined by hyphens, not underscores}
+  - {identifier: "geonexus:-project@1", note: a word opens on a letter}
+  - {identifier: "geonexus:project-@1", note: a word ends on a letter or a digit}
+  - {identifier: "geonexus:pro--ject@1", note: hyphens are single}
+  - {identifier: "geonexus:1project@1", note: a word opens on a letter}
+  - {identifier: "geonexus:view.@1", note: a dot joins two words}
+  - {identifier: "geonexus:.view@1", note: a name opens on a word}
+  - {identifier: "geonexus:view..act@1", note: dots are single}
+  - {identifier: "geo.nexus:project@1", note: the namespace holds no dot}
+  - {identifier: ":project@1", note: the namespace is required}
+  - {identifier: "geonexus:@1", note: the name is required}
+  - {identifier: "geonexus:project@1 ", note: no space}
+  - {identifier: "geonexus:project@1\n", note: no line break}
+  - {identifier: "geonexus::project@1", note: one colon}
+  - {identifier: "geonexus:project@1@2", note: one version}
+  - {identifier: "", note: the empty string}
