@@ -1,0 +1,10 @@
+# Configuration of Kleisis for its own schemas, which it publishes under absolute identifiers.
+_schema: kleisis:configuration@1
+
+paths:
+  owned_schemas: specs/schemas
+  registry: specs/schema-registry.yml
+
+exports:
+  - kleisis:configuration@1
+  - kleisis:schema-registry@2
