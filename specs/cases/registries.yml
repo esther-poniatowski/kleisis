@@ -291,3 +291,398 @@ cases:
       schemas: {}
       resources: [urn:tool:base]
     expect: {error: registry/invalid}
+
+  # --- YAML 1.1 as PyYAML reads it -----------------------------------------------------------------
+  # Each outcome was measured on the Python reader. A reader in another language reproduces the
+  # resolution of scalars, the tags and the constructors of PyYAML, so that one file has one verdict.
+
+  - name: pyyaml-a-plain-y-is-a-string
+    description: a plain y is a string
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {a:b@1: y}
+    expect:
+      version: 2
+      schemas:
+        a:b@1: y
+      exports: []
+      resources: {}
+  - name: pyyaml-a-plain-yes-is-a-boolean
+    description: a plain yes is a boolean
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {a:b@1: yes}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-a-plain-1e3-is-a-string
+    description: a plain 1e3 is a string
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {a:b@1: 1e3}
+    expect:
+      version: 2
+      schemas:
+        a:b@1: "1e3"
+      exports: []
+      resources: {}
+  - name: pyyaml-an-integer-is-no-path
+    description: an integer is no path
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {a:b@1: 5}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-a-blank-path-is-no-path
+    description: a blank path is no path
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {a:b@1: ' '}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-a-sexagesimal-integer-is-no-path
+    description: a sexagesimal integer is no path
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {a:b@1: 190:20:30}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-an-ordered-map-is-no-path
+    description: an ordered map is no path
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {a:b@1: !!omap [{a: b}]}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-a-non-specific-tag-resolves-a-plain-scalar
+    description: a non-specific tag resolves a plain scalar
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {a:b@1: ! 5}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-a-non-specific-tag-resolves-a-quoted-scalar
+    description: a non-specific tag resolves a quoted scalar
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {a:b@1: ! "5"}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-a-non-specific-tag-resolves-a-quoted-merge-key
+    description: a non-specific tag resolves a quoted merge key
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {! '<<': x}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-an-explicit-string
+    description: an explicit string
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {a:b@1: !!str 5}
+    expect:
+      version: 2
+      schemas:
+        a:b@1: "5"
+      exports: []
+      resources: {}
+  - name: pyyaml-an-explicit-map
+    description: an explicit map
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: !!map {}
+    expect:
+      version: 2
+      schemas: {}
+      exports: []
+      resources: {}
+  - name: pyyaml-a-timestamp-has-no-json-form
+    description: a timestamp has no JSON form
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {a:b@1: 2001-12-14}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-a-timestamp-key-has-no-json-form
+    description: a timestamp key has no JSON form
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {}
+      resources: {2001-01-01: y}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-a-nan-has-no-strict-json-form
+    description: a NaN has no strict JSON form
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {a:b@1: .nan}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-a-set-has-no-json-form
+    description: a set has no JSON form
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {a:b@1: !!set {x}}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-a-binary-has-no-json-form
+    description: a binary has no JSON form
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {a:b@1: x, !!binary YQ==: y}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-a-value-key-has-no-constructor
+    description: a value key `=` has no constructor
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {a:b@1: =}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-a-merge-value-has-no-constructor
+    description: a merge value has no constructor
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {a:b@1: <<}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-a-merge-key-is-rejected
+    description: a merge key is rejected
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {<<: {}}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-a-quoted-is-an-ordinary-key
+    description: a quoted << is an ordinary key
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {'<<': x}
+    expect:
+      error: contract/identifier
+  - name: pyyaml-an-unknown-tag-has-no-constructor
+    description: an unknown tag has no constructor
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {a:b@1: !foo x}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-an-invalid-explicit-integer
+    description: an invalid explicit integer
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {a:b@1: !!int x}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-1-and-1-0-are-one-key
+    description: 1 and 1.0 are one key
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {1: a, 1.0: b}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-a-sequence-key-is-unhashable
+    description: a sequence key is unhashable
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {? [a]: x}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-a-recursive-document
+    description: a recursive document
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {}
+      foo: &x [*x]
+    expect:
+      error: registry/invalid
+  - name: pyyaml-two-documents
+    description: two documents
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {}
+      ---
+      a: 1
+    expect:
+      error: registry/invalid
+  - name: pyyaml-an-alias
+    description: an alias
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: &a {a:b@1: x}
+      resources: *a
+    expect:
+      version: 2
+      schemas:
+        a:b@1: x
+      exports: []
+      resources:
+        a:b@1: x
+  - name: pyyaml-a-path-is-normalized
+    description: a path is normalized
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {a:b@1: a//b/./c/}
+    expect:
+      version: 2
+      schemas:
+        a:b@1: a/b/c
+      exports: []
+      resources: {}
+  - name: pyyaml-the-path-is-the-root
+    description: the path ./. is the root
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {a:b@1: ./.}
+    expect:
+      error: path/escape
+  - name: pyyaml-two-slashes-open-an-absolute-path
+    description: two slashes open an absolute path
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {a:b@1: //x}
+    expect:
+      error: path/escape
+  - name: pyyaml-a-kelvin-sign-opens-a-scheme
+    description: a Kelvin sign opens a scheme
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {}
+      resources: {Ka:b: x}
+    expect:
+      version: 2
+      schemas: {}
+      exports: []
+      resources:
+        Ka:b: x
+  - name: pyyaml-a-dotless-i-opens-a-scheme
+    description: a dotless i opens a scheme
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {}
+      resources: {ıa:b: x}
+    expect:
+      version: 2
+      schemas: {}
+      exports: []
+      resources:
+        ıa:b: x
+  - name: pyyaml-a-keyword-described-by-x1c-only
+    description: a keyword described by \x1c only
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {}
+      keywords: {x-a: "\x1c"}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-a-keyword-described-by-a-bom
+    description: a keyword described by a BOM
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {}
+      keywords: {x-a: "\ufeff"}
+    expect:
+      version: 2
+      schemas: {}
+      exports: []
+      resources: {}
+      keywords: {x-a: "\ufeff"}
+  - name: pyyaml-a-null-keyword-description
+    description: a null keyword description
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {}
+      keywords: {x-a: ~}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-a-float-version
+    legacy: true
+    description: a float version
+    document: |
+      schema_version: 2.0
+      schemas: {}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-a-hexadecimal-version
+    legacy: true
+    description: a hexadecimal version
+    document: |
+      schema_version: 0x2
+      schemas: {}
+    expect:
+      version: 2
+      schemas: {}
+      exports: []
+      resources: {}
+  - name: pyyaml-an-octal-version
+    legacy: true
+    description: an octal version
+    document: |
+      schema_version: 02
+      schemas: {}
+    expect:
+      version: 2
+      schemas: {}
+      exports: []
+      resources: {}
+  - name: pyyaml-a-binary-version
+    legacy: true
+    description: a binary version
+    document: |
+      schema_version: 0b10
+      schemas: {}
+    expect:
+      version: 2
+      schemas: {}
+      exports: []
+      resources: {}
+  - name: pyyaml-a-signed-version
+    legacy: true
+    description: a signed version
+    document: |
+      schema_version: +2
+      schemas: {}
+    expect:
+      version: 2
+      schemas: {}
+      exports: []
+      resources: {}
+  - name: pyyaml-an-explicit-integer-version
+    legacy: true
+    description: an explicit integer version
+    document: |
+      schema_version: !!int '2'
+      schemas: {}
+    expect:
+      version: 2
+      schemas: {}
+      exports: []
+      resources: {}
+  - name: pyyaml-a-boolean-version
+    legacy: true
+    description: a boolean version
+    document: |
+      schema_version: true
+      schemas: {}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-an-underscored-version
+    legacy: true
+    description: an underscored version
+    document: |
+      schema_version: 1_0
+      schemas: {}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-a-sexagesimal-version
+    legacy: true
+    description: a sexagesimal version
+    document: |
+      schema_version: 1:0
+      schemas: {}
+    expect:
+      error: registry/invalid
+  - name: pyyaml-an-empty-file
+    description: an empty file
+    document: ""
+    expect:
+      error: registry/invalid
