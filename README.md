@@ -207,8 +207,11 @@ A parent imports child exports from explicitly declared repositories:
 ```yaml
 projects:
   - path: projects/mixture-input-encoding
+    registry: specs/schema-registry.yml
     required: true
 ```
+
+The key `registry` names the generated registry of the child, relative to the child, as the configuration of the child declares it.
 
 The materialization command treats each child registry and dependency closure as immutable input. The parent rejects these invalid states:
 

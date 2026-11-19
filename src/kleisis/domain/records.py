@@ -339,7 +339,7 @@ def _resource_record(raw: object) -> ResourceRecord:
     project_paths: set[object] = set()
     for index, item in enumerate(_sequence(root.get("projects"), "projects")):
         raw_project = _mapping(item, f"projects[{index}]")
-        _keys(raw_project, {"path", "required"}, f"projects[{index}]")
+        _keys(raw_project, {"path", "registry", "required"}, f"projects[{index}]")
         project_path = safe_relative_path(raw_project.get("path"), f"projects[{index}].path")
         if project_path in project_paths:
             raise RecordError(
@@ -352,7 +352,15 @@ def _resource_record(raw: object) -> ResourceRecord:
                 f"projects[{index}].required must be a boolean",
                 locus=pointer("projects", index, "required"),
             )
-        projects.append(Project(path=project_path, required=required))
+        projects.append(
+            Project(
+                path=project_path,
+                registry=safe_relative_path(
+                    raw_project.get("registry"), f"projects[{index}].registry"
+                ),
+                required=required,
+            )
+        )
 
     return ResourceRecord(
         paths=paths,

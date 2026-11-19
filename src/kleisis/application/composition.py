@@ -48,7 +48,14 @@ def compose_registry(
             locus=pointer("projects"),
             discriminator=project.path.as_posix(),
         )
-        child_registry_path = child_root / "specs/schema-registry.yml"
+        child_registry_path = resolve_inside(
+            child_root,
+            project.registry,
+            "projects.registry",
+            subject=record_path,
+            locus=pointer("projects"),
+            discriminator=project.path.as_posix(),
+        )
         if not child_registry_path.is_file():
             if project.required:
                 raise RegistryError(

@@ -139,9 +139,14 @@ class Dependency:
 
 @dataclass(frozen=True)
 class Project:
-    """A checked-out child repository included in a composite registry."""
+    """A checked-out child repository included in a composite registry.
+
+    ``registry`` names the generated registry of the child, relative to the child, as the child
+    declares it in its own configuration.
+    """
 
     path: PurePosixPath
+    registry: PurePosixPath
     required: bool = True
 
 

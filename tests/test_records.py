@@ -352,3 +352,9 @@ def test_a_contract_outside_the_grammar_is_rejected(tmp_path: Path, body: str, l
     finding = caught.value.findings[0]
     assert finding.rule.id == "contract/identifier"
     assert finding.locus == locus
+
+
+def test_a_child_project_declares_its_registry(tmp_path: Path) -> None:
+    with pytest.raises(RecordError, match=r"projects\[0\]\.registry") as caught:
+        load_resource_record(write_record(tmp_path, HEADER + "projects:\n  - path: child\n"))
+    assert caught.value.findings[0].locus == "/projects/0/registry"

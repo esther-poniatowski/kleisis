@@ -272,7 +272,9 @@ def owned_label_differs(tests: Path, consumer: Path) -> None:
 def child_shares_other_bytes(tests: Path, consumer: Path) -> None:
     del tests
     with (consumer / "kleisis.yml").open("a", encoding="utf-8") as record:
-        record.write("projects:\n  - path: projects/child\n")
+        record.write(
+            "projects:\n  - path: projects/child\n    registry: specs/schema-registry.yml\n"
+        )
     write_tree(
         consumer / "projects/child",
         {
@@ -302,6 +304,7 @@ paths:
 exports: [parent:owned@1]
 projects:
   - path: projects/child
+    registry: specs/schema-registry.yml
 """,
             "projects/child/specs/schemas/child.schema.yaml": concrete_schema("child:owned@1"),
             "projects/child/specs/schema-registry.yml": """_schema: kleisis:schema-registry@2

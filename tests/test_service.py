@@ -309,7 +309,7 @@ def test_state_folder_cannot_overlap_a_child_checkout(tmp_path: Path) -> None:
     (root / "specs/schemas").mkdir(parents=True)
     (root / "kleisis.yml").write_text(
         f"{RECORD_MARKER}  state: projects\n  resources: resources\n"
-        "projects:\n  - path: projects/child\n",
+        "projects:\n  - path: projects/child\n    registry: specs/schema-registry.yml\n",
         encoding="utf-8",
     )
 
@@ -584,6 +584,7 @@ paths:
 exports: [parent:owned@1, shared:contract@1]
 projects:
   - path: projects/child
+    registry: specs/schema-registry.yml
 """,
         encoding="utf-8",
     )
@@ -627,6 +628,7 @@ paths:
 exports: [parent:owned@1]
 projects:
   - path: projects/child
+    registry: specs/schema-registry.yml
 """,
         encoding="utf-8",
     )
@@ -917,6 +919,7 @@ paths:
 exports: [parent:owned@1]
 projects:
   - path: projects/child
+    registry: specs/schema-registry.yml
 """,
         },
     )
@@ -1107,6 +1110,7 @@ paths:
 exports: [parent:owned@1]
 projects:
   - path: projects/child
+    registry: specs/schema-registry.yml
 """,
         },
     )
@@ -1128,3 +1132,33 @@ resources: {}
         ReferenceError, match=f"'{ROOTED}' in specs/schemas/child.schema.yaml .* absolute \\$id"
     ):
         SchemaClosureService(CONFIG).validate(root)
+
+
+def test_a_child_registry_is_read_at_the_path_that_the_parent_declares(tmp_path: Path) -> None:
+    root = tmp_path / "parent"
+    (root / "schemas").mkdir(parents=True)
+    (root / "schemas/parent.schema.yaml").write_text(
+        concrete_schema("parent:owned@1"), encoding="utf-8"
+    )
+    (root / "kleisis.yml").write_text(
+        "_schema: kleisis:configuration@1\n"
+        "paths: {owned_schemas: schemas, registry: registry.yml}\n"
+        "exports: [parent:owned@1]\n"
+        "projects:\n  - path: child\n    registry: contracts/registry.yml\n",
+        encoding="utf-8",
+    )
+    child = root / "child"
+    (child / "contracts").mkdir(parents=True)
+    (child / "contracts/child.schema.yaml").write_text(
+        concrete_schema("child:owned@1"), encoding="utf-8"
+    )
+    (child / "contracts/registry.yml").write_text(
+        f"{REGISTRY_MARKER}\nschemas:\n  child:owned@1: contracts/child.schema.yaml\n"
+        "exports: [child:owned@1]\n",
+        encoding="utf-8",
+    )
+
+    SchemaClosureService(CONFIG).materialize(root)
+
+    registry = load_registry(root / "registry.yml")
+    assert registry.schemas["child:owned@1"].as_posix() == "child/contracts/child.schema.yaml"
