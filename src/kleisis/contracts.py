@@ -1,7 +1,7 @@
 """Grammar of a contract identifier, `<namespace>:<name>@<version>`, a public interface of Kleisis.
 
-The [schema of the grammar](../../specs/schemas/contract-identifier.schema.json) publishes the
-same pattern, and the cases of `specs/cases/contract-identifiers.yml` fix its verdicts. A reader
+The schema `specs/schemas/contract-identifier.schema.json` publishes the same pattern, and the
+cases of `specs/cases/contract-identifiers.yml` fix its verdicts. A reader
 in another tool refers to the schema by its `$id`, or runs the cases.
 """
 
