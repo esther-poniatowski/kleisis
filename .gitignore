@@ -8,3 +8,5 @@ build/
 dist/
 *.egg-info/
 .kleisis/
+packages/registry/node_modules/
+packages/registry/dist/

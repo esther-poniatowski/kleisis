@@ -245,12 +245,13 @@ The parent imports each child `resources` entry under the child path, unless the
 
 ## Public interface
 
-Two modules form the public interface of Kleisis, and the other modules may change in any release:
+Two Python modules and one TypeScript package form the public interface of Kleisis, and the other modules may change in any release:
 
 - `kleisis.registry` reads a generated registry: `read_registry(path)` returns its `schemas`, `exports` and `resources`, or raises `RegistryError`, whose findings name the rule broken.
 - `kleisis.contracts` checks and parses a contract identifier, `<namespace>:<name>@<version>`.
+- [`@kleisis/registry`](packages/registry/README.md) reads a generated registry in TypeScript, with the verdicts of `kleisis.registry`, and checks a contract identifier.
 
-Both modules import PyYAML and the standard library only. Another tool reads a registry through `kleisis.registry`, or runs the [cases of the registry](specs/cases/registries.yml). It checks a contract identifier through `kleisis.contracts`, through the [schema of the grammar](specs/schemas/contract-identifier.schema.json) by its `$id`, or through the [cases of the grammar](specs/cases/contract-identifiers.yml).
+Both Python modules import PyYAML and the standard library only. Another tool reads a registry through `kleisis.registry`, or runs the [cases of the registry](specs/cases/registries.yml). It checks a contract identifier through `kleisis.contracts`, through the [schema of the grammar](specs/schemas/contract-identifier.schema.json) by its `$id`, or through the [cases of the grammar](specs/cases/contract-identifiers.yml).
 
 ## Design
 

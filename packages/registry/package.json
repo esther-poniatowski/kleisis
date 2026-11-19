@@ -1,0 +1,48 @@
+{
+  "name": "@kleisis/registry",
+  "version": "0.0.0",
+  "description": "Reads a schema registry of Kleisis, kleisis:schema-registry@2, in TypeScript.",
+  "author": "Esther Poniatowski",
+  "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/esther-poniatowski/kleisis.git",
+    "directory": "packages/registry"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint --config config/tools/eslint.config.mjs src tests",
+    "format": "prettier --config config/tools/prettier.json --ignore-path config/tools/prettier.ignore --write src tests config",
+    "format:check": "prettier --config config/tools/prettier.json --ignore-path config/tools/prettier.ignore --check src tests config",
+    "test": "vitest run --config config/tools/vitest.config.ts",
+    "build": "tsc --project tsconfig.build.json",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "eslint": "^9.14.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.13.0",
+    "vitest": "^5.1.0"
+  }
+}
