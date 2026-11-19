@@ -11,6 +11,7 @@ import yaml
 
 from kleisis.contracts import is_contract_identifier
 from kleisis.domain.documents import load_document
+from kleisis.domain.keywords import KEYWORD
 from kleisis.domain.models import (
     DEFAULT_BINDING,
     DEFAULT_CONVENTION,
@@ -45,7 +46,7 @@ IDENTIFIER_LOCUS = pointer("$id")
 """The locus of the absolute identifier that a schema declares at its root."""
 REGISTRY_FORMAT = "kleisis:schema-registry@2"
 """The format identifier that a registry declares in its first key ``_schema``."""
-_REGISTRY_FIELDS = {"_schema", "schemas", "exports", "resources"}
+_REGISTRY_FIELDS = {"_schema", "schemas", "exports", "resources", "keywords"}
 _LEGACY_REGISTRY_FIELDS = {
     1: {"schema_version", "schemas", "exports"},
     2: {"schema_version", "schemas", "exports", "resources"},
@@ -274,7 +275,30 @@ def load_registry(path: Path) -> Registry:
                 subject=path,
                 locus=pointer("resources"),
             )
-    return Registry(schemas=schemas, exports=exports, resources=resources, schema_version=version)
+    return Registry(
+        schemas=schemas,
+        exports=exports,
+        resources=resources,
+        schema_version=version,
+        keywords=_registry_keywords(path, root.get("keywords", {})),
+    )
+
+
+def _registry_keywords(path: Path, value: object) -> dict[str, str]:
+    """Return the keywords of a registry, each named `x-<words>` with a non-empty description."""
+    if not isinstance(value, dict):
+        raise RegistryError(
+            f"{path} must contain a keywords mapping", subject=path, locus=pointer("keywords")
+        )
+    for name, description in value.items():
+        valid_name = isinstance(name, str) and KEYWORD.fullmatch(name) is not None
+        if not valid_name or not isinstance(description, str) or not description.strip():
+            raise RegistryError(
+                f"{path} keywords holds {name!r}, which must be named x-<words> and described",
+                subject=path,
+                locus=pointer("keywords", str(name)),
+            )
+    return cast(dict[str, str], dict(value))
 
 
 def resource_map(root: Path, files: Iterable[Path]) -> dict[str, PurePosixPath]:
@@ -324,4 +348,9 @@ def registry_bytes(registry: Registry) -> bytes:
             lines.append(f"  {json.dumps(uri)}: {json.dumps(target.as_posix())}")
     else:
         lines.append("resources: {}")
+    # Written only when declared, so that a registry without keywords keeps its bytes.
+    if registry.keywords:
+        lines.append("keywords:")
+        for name, description in sorted(registry.keywords.items()):
+            lines.append(f"  {json.dumps(name)}: {json.dumps(description)}")
     return ("\n".join(lines) + "\n").encode()

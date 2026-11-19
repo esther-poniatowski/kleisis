@@ -159,6 +159,8 @@ class ResourceRecord:
     exports: tuple[str, ...] = ()
     dependencies: tuple[Dependency, ...] = ()
     projects: tuple[Project, ...] = ()
+    keywords: dict[str, str] = field(default_factory=dict)
+    """The `x-` keywords that the consumer declares, each with its description."""
 
 
 @dataclass(frozen=True)
@@ -174,6 +176,8 @@ class Registry:
     exports: tuple[str, ...] = ()
     resources: dict[str, PurePosixPath] = field(default_factory=dict)
     schema_version: int = 2
+    keywords: dict[str, str] = field(default_factory=dict)
+    """The `x-` keywords that the repository declares, each with its description."""
 
 
 @dataclass(frozen=True)

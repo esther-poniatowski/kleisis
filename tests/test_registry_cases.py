@@ -34,4 +34,5 @@ def test_case(case: dict[str, Any], tmp_path: Path) -> None:
         "schemas": {key: value.as_posix() for key, value in registry.schemas.items()},
         "exports": list(registry.exports),
         "resources": {key: value.as_posix() for key, value in registry.resources.items()},
-    } == expect
+        "keywords": registry.keywords,
+    } == {"keywords": {}, **expect}

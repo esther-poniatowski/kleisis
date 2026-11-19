@@ -139,6 +139,22 @@ schemas:
 
 A suffix opens with a dot and holds no path separator. A binding is a property name of letters, digits, `_` and `-`. The convention of a dependency may differ from that of the consumer, so a dependency entry may name the binding of its own contracts under the key `binding`, which defaults to `_schema`.
 
+### Keywords of schemas
+
+A keyword of the form `x-<words>` extends JSON Schema with a meaning that a tool gives it, such as a widget of a form. Each such keyword has one owner, the tool that reads it. The owner declares the keyword once, with its description, in the key `keywords` of its configuration:
+
+```yaml
+keywords:
+  x-kind: renders a field with a widget kind
+```
+
+Kleisis writes these declarations into the generated registry of the owner. A consumer reads the keywords of its dependencies from their registries, and Kleisis checks two rules on each build:
+
+- one keyword has one declaring source among the configuration and the registries of the dependencies;
+- each `x-` keyword that an owned schema uses at a position of a schema is declared by one of these sources.
+
+A key of `properties`, or of another map of schemas, names a property and not a keyword. The value of a keyword outside JSON Schema, such as `const` or an `x-` keyword, is data, and Kleisis does not search it. A materialized schema is checked in the repository that owns it.
+
 ## Commands
 
 The three commands keep writes separate from checks:
@@ -190,15 +206,16 @@ An earlier release left its journal at the root, as `.kleisis-transaction.json` 
 
 The receipt declares `_schema: kleisis:receipt@1` as its first key. No command reads a receipt back: `check` compares it by bytes with a fresh build, so a receipt in another format reports drift until `materialize` rewrites it.
 
-The generated registry declares `_schema: kleisis:schema-registry@2` as its first key, and holds three further keys:
+The generated registry declares `_schema: kleisis:schema-registry@2` as its first key, and holds three further keys, and a fourth when the configuration declares keywords:
 
 - `schemas` maps each contract identifier to its file, including a dependency identifier outside the export set;
 - `exports` lists only project-owned identifiers;
-- `resources` maps each absolute `$id` string, exactly as written in a schema file, to the repository-relative path of that file.
+- `resources` maps each absolute `$id` string, exactly as written in a schema file, to the repository-relative path of that file;
+- `keywords` maps each `x-` keyword that the configuration declares to its description. Kleisis writes this key only when the configuration declares a keyword, so a registry without keywords keeps its bytes.
 
 The key `resources` covers every owned or materialized schema file whose root declares an absolute `$id`, which starts with a URI scheme. Two files may declare one `$id` only with identical bytes. A consumer cannot regenerate the registry of a dependency or a child repository, so Kleisis also reads two legacy forms there: `schema_version: 1`, without the key `resources`, and `schema_version: 2`, with it. An absent `resources` reads as an empty map. Any other value, both keys together, or neither key fails the command. A legacy registry of the consumer itself differs from a fresh build, so `check` reports it as drift and `materialize` rewrites it. The [closure across sources](docs/adr/closure-across-sources.md) records this format. The [schema of the registry](specs/schemas/schema-registry.schema.json) publishes it under an absolute `$id`, and [its cases](specs/cases/registries.yml) fix the verdict of a reader on each form.
 
-An owned contract uses the root path `properties.<binding>.const` to state its identifier, where `<binding>` is the binding of the configuration, `_schema` by default. Its root `required` list must also name the binding. The resource record must export every contract with both entries. A file with neither entry remains an owned support schema. The support schema can still serve a `$ref`. A file with only one entry or an invalid value fails the command.
+An owned contract uses the root path `properties.<binding>.const` to state its identifier, where `<binding>` is the binding of the configuration, `_schema` by default. Its root `required` list must also name the binding. The configuration must export every contract with both entries. A file with neither entry remains an owned support schema. The support schema can still serve a `$ref`. A file with only one entry or an invalid value fails the command.
 
 ## Child projects
 

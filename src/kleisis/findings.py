@@ -65,6 +65,13 @@ CONTRACT_UNOWNED_EXPORT = Rule(
 CONTRACT_UNPROVIDED = Rule(
     "contract/unprovided", "A dependency registry does not provide a selected contract."
 )
+KEYWORD_DUPLICATE = Rule(
+    "keyword/duplicate", "Two sources declare one `x-` keyword: the configuration or a dependency."
+)
+KEYWORD_UNDECLARED = Rule(
+    "keyword/undeclared",
+    "An owned schema uses an `x-` keyword that neither the configuration nor a dependency declares.",
+)
 DEPENDENCY_NO_RESOURCES = Rule(
     "dependency/no-resources",
     "A dependency that selects no contract has a registry without resources.",
@@ -132,6 +139,8 @@ RULES: tuple[Rule, ...] = (
     CONTRACT_UNPROVIDED,
     DEPENDENCY_NO_RESOURCES,
     DEPENDENCY_UNUSED,
+    KEYWORD_DUPLICATE,
+    KEYWORD_UNDECLARED,
     REFERENCE_UNMAPPED,
     REFERENCE_CONFLICTING_BYTES,
     REFERENCE_IDENTIFIER_MISMATCH,

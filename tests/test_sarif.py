@@ -229,6 +229,12 @@ def primitives_contract_renamed(tests: Path, consumer: Path) -> None:
     )
 
 
+def keyword_declared_twice(tests: Path, consumer: Path) -> None:
+    for path in (tests / "primitives/specs/schema-registry.yml", consumer / "kleisis.yml"):
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write('keywords:\n  x-shared: "a keyword declared by two sources"\n')
+
+
 def shared_contract_unprovided(tests: Path, consumer: Path) -> None:
     del tests
     replace_in(
@@ -379,6 +385,14 @@ SCENARIOS: dict[str, tuple[Scenario, list[str]]] = {
     "contract/identifier": (
         owned_tree({"owned.schema.yaml": concrete_schema("Consumer:owned@1")}, exports="[]"),
         [f"kleisis|contract/identifier|{OWNED}|/properties/_schema/const"],
+    ),
+    "keyword/duplicate": (
+        two_sources(NOTE, keyword_declared_twice),
+        [f"kleisis|keyword/duplicate|{RECORD}|/dependencies|primitives:x-shared"],
+    ),
+    "keyword/undeclared": (
+        owned_tree({"owned.schema.yaml": concrete_schema("consumer:owned@1") + "x-kind: note\n"}),
+        [f"kleisis|keyword/undeclared|{OWNED}|/x-kind"],
     ),
     "contract/binding-mismatch": (
         two_sources(NOTE, primitives_contract_renamed),

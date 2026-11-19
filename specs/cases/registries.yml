@@ -1,7 +1,7 @@
 # Conformance cases of the registry format, kleisis:schema-registry@2.
 #
 # Each case gives the text of a registry file, `registry.yml`, and the outcome of a reader: either
-# the four values read, or the rule of the finding that rejects the file. A conforming reader, such
+# the values read, or the rule of the finding that rejects the file. A conforming reader, such
 # as `kleisis.registry.read_registry`, gives the same outcome on each case.
 #
 # The forms `schema_version: 1` and `schema_version: 2` precede the key `_schema`. A reader accepts
@@ -70,6 +70,14 @@ cases:
       schemas: {}
       _schema: kleisis:schema-registry@2
     expect: {version: 2, schemas: {}, exports: [], resources: {}}
+
+  - name: keywords
+    description: a registry lists the keywords that its repository declares
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {}
+      keywords: {x-kind: renders a field with a widget kind}
+    expect: {version: 2, schemas: {}, exports: [], resources: {}, keywords: {x-kind: renders a field with a widget kind}}
 
   # --- Legacy forms --------------------------------------------------------------------------------
 
@@ -207,6 +215,38 @@ cases:
       _schema: kleisis:schema-registry@2
       schemas: {tool:base@1: schemas/base.schema.yaml}
       exports: [tool:other@1]
+    expect: {error: registry/invalid}
+
+  # --- keywords ----------------------------------------------------------------------------------
+
+  - name: keyword-without-prefix
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {}
+      keywords: {kind: renders a field}
+    expect: {error: registry/invalid}
+
+  - name: keyword-without-description
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {}
+      keywords: {x-kind: ""}
+    expect: {error: registry/invalid}
+
+  - name: keywords-not-a-mapping
+    document: |
+      _schema: kleisis:schema-registry@2
+      schemas: {}
+      keywords: [x-kind]
+    expect: {error: registry/invalid}
+
+  - name: keywords-in-legacy-form
+    legacy: true
+    document: |
+      schema_version: 2
+      schemas: {}
+      resources: {}
+      keywords: {x-kind: renders a field}
     expect: {error: registry/invalid}
 
   # --- resources -----------------------------------------------------------------------------------

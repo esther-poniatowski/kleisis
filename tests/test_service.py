@@ -1162,3 +1162,52 @@ def test_a_child_registry_is_read_at_the_path_that_the_parent_declares(tmp_path:
 
     registry = load_registry(root / "registry.yml")
     assert registry.schemas["child:owned@1"].as_posix() == "child/contracts/child.schema.yaml"
+
+
+def _append(path: Path, text: str) -> None:
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(text)
+
+
+def test_a_keyword_declared_by_the_configuration_enters_the_registry(tmp_path: Path) -> None:
+    consumer, provider = make_two_sources(tmp_path, NOTE)
+    owned = consumer / "specs/schemas/owned.schema.yaml"
+    _append(owned, "x-kind: note\n")
+    _append(consumer / "kleisis.yml", 'keywords:\n  x-kind: "renders a field with a widget kind"\n')
+
+    SchemaClosureService(CONFIG, source_provider=provider).materialize(consumer)
+
+    text = (consumer / "specs/schema-registry.yml").read_text(encoding="utf-8")
+    assert text.endswith('keywords:\n  "x-kind": "renders a field with a widget kind"\n')
+    assert load_registry(consumer / "specs/schema-registry.yml").keywords == {
+        "x-kind": "renders a field with a widget kind"
+    }
+
+
+def test_a_keyword_declared_by_a_dependency_admits_its_use(tmp_path: Path) -> None:
+    consumer, provider = make_two_sources(tmp_path, NOTE)
+    _append(consumer / "specs/schemas/owned.schema.yaml", "x-kind: note\n")
+    _append(
+        tmp_path / "primitives/specs/schema-registry.yml",
+        'keywords:\n  x-kind: "renders a field with a widget kind"\n',
+    )
+
+    SchemaClosureService(CONFIG, source_provider=provider).materialize(consumer)
+
+    # The registry of the consumer lists only its own keywords, and here declares none.
+    assert "keywords" not in (consumer / "specs/schema-registry.yml").read_text(encoding="utf-8")
+
+
+def test_an_undeclared_keyword_is_reported_and_a_property_name_is_not(tmp_path: Path) -> None:
+    consumer, provider = make_two_sources(tmp_path, NOTE)
+    _append(
+        consumer / "specs/schemas/owned.schema.yaml",
+        "x-kind: note\n$defs:\n  label:\n    properties:\n      x-name: {x-widget: text}\n",
+    )
+
+    with pytest.raises(RegistryError, match="x-kind, x-widget") as caught:
+        SchemaClosureService(CONFIG, source_provider=provider).validate(consumer)
+    assert [finding.locus for finding in caught.value.findings] == [
+        "/x-kind",
+        "/$defs/label/properties/x-name/x-widget",
+    ]

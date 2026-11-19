@@ -1,7 +1,7 @@
 """Materialize selected contracts and their closure from exact dependency sources."""
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -87,6 +87,8 @@ class AcquiredDependency:
     source: SchemaSource
     contracts: dict[str, PurePosixPath]
     entrypoints: tuple[Path, ...]
+    keywords: dict[str, str] = field(default_factory=dict)
+    """The `x-` keywords that the registry of the dependency declares."""
 
 
 def acquire_dependency(
@@ -172,6 +174,7 @@ def acquire_dependency(
             identifier: source_registry.schemas[identifier] for identifier in dependency.contracts
         },
         entrypoints=entrypoints,
+        keywords=source_registry.keywords,
     )
 
 

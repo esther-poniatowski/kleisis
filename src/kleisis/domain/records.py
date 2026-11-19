@@ -15,6 +15,7 @@ import yaml
 
 from kleisis.contracts import is_contract_identifier
 from kleisis.domain.documents import load_document
+from kleisis.domain.keywords import KEYWORD
 from kleisis.domain.models import (
     DEFAULT_BINDING,
     DEFAULT_SCHEMA_SUFFIXES,
@@ -167,7 +168,7 @@ def _resource_record(raw: object) -> ResourceRecord:
     _check_format(root)
     _keys(
         root,
-        {"_schema", "paths", "schemas", "exports", "dependencies", "projects"},
+        {"_schema", "paths", "schemas", "exports", "dependencies", "projects", "keywords"},
         "record",
     )
 
@@ -368,7 +369,25 @@ def _resource_record(raw: object) -> ResourceRecord:
         exports=exports,
         dependencies=tuple(dependencies),
         projects=tuple(projects),
+        keywords=_keywords(root.get("keywords", {})),
     )
+
+
+def _keywords(raw: object) -> dict[str, str]:
+    """Return the declared keywords, each named `x-<words>` and described by a non-empty string."""
+    declared = _mapping(raw, "keywords")
+    for name, description in declared.items():
+        if not isinstance(name, str) or not KEYWORD.fullmatch(name):
+            raise RecordError(
+                f"keyword {name!r} must be x- followed by words in lower kebab case",
+                locus=pointer("keywords", str(name)),
+            )
+        if not isinstance(description, str) or not description.strip():
+            raise RecordError(
+                f"keyword {name} must hold a non-empty description",
+                locus=pointer("keywords", name),
+            )
+    return dict(declared)
 
 
 def _binding(value: object, field_name: str) -> str:

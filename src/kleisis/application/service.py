@@ -25,6 +25,8 @@ from kleisis.domain.models import (
     ResourceRecord,
     resolve_inside,
 )
+from kleisis.domain.documents import load_document
+from kleisis.domain.keywords import used_keywords
 from kleisis.domain.records import load_resource_record
 from kleisis.domain.references import SchemaSource, source_closure
 from kleisis.domain.registry import (
@@ -42,6 +44,8 @@ from kleisis.findings import (
     DEPENDENCY_UNUSED,
     DRIFT_REGISTRY,
     DRIFT_RESOURCES,
+    KEYWORD_DUPLICATE,
+    KEYWORD_UNDECLARED,
     RECORD_PATH_OVERLAP,
     Finding,
     complete,
@@ -300,6 +304,7 @@ class SchemaClosureService:
         acquired = [
             self._acquire(record, index, work_root) for index in range(len(record.dependencies))
         ]
+        self._check_keywords(root, record, acquired)
         requested: list[tuple[SchemaSource, Path]] = []
         while True:
             materialized, external = self._materialize(acquired, record, resources_stage, requested)
@@ -335,11 +340,69 @@ class SchemaClosureService:
         )
         resources = resource_map(validation_root, [*closure.listed_files, *consumer_files])
         (resources_stage / _RECEIPT).write_bytes(receipt_bytes(materialized, resources_stage))
-        local = Registry(schemas={**owned, **external}, exports=record.exports, resources=resources)
+        local = Registry(
+            schemas={**owned, **external},
+            exports=record.exports,
+            resources=resources,
+            keywords=dict(record.keywords),
+        )
         composite = compose_registry(root, record, local, resources_stage, self.record_path)
         shutil.rmtree(work_root)
         shutil.rmtree(validation_root)
         return CandidateState(resources=resources_stage, registry=composite)
+
+    def _check_keywords(
+        self, root: Path, record: ResourceRecord, acquired: list[AcquiredDependency]
+    ) -> None:
+        """Require one declaring source per `x-` keyword, and a declaration for each owned use.
+
+        The declaring sources are the configuration and the registry of each dependency. Only the
+        owned schemas are searched: a materialized file was checked in its own repository.
+        """
+        declared = {name: "the configuration" for name in record.keywords}
+        duplicates: list[Finding] = []
+        for dependency in acquired:
+            owner = f"dependency {dependency.dependency.id}"
+            for name in sorted(dependency.keywords):
+                if name in declared:
+                    duplicates.append(
+                        Finding(
+                            rule=KEYWORD_DUPLICATE,
+                            message=f"keyword {name} is declared by {declared[name]} and {owner}",
+                            subject=self.record_path,
+                            locus=pointer("dependencies"),
+                            discriminator=f"{dependency.dependency.id}:{name}",
+                        )
+                    )
+                else:
+                    declared[name] = owner
+        if duplicates:
+            raise RegistryError(
+                "keywords are declared twice: "
+                + ", ".join(finding.discriminator for finding in duplicates),
+                findings=duplicates,
+            )
+        owned_root = resolve_inside(root, record.paths.owned_schemas, "paths.owned_schemas")
+        undeclared: list[Finding] = []
+        names: set[str] = set()
+        for path in sorted(candidate_schemas(owned_root, record.schemas.suffixes)):
+            subject = PurePosixPath(path.relative_to(root).as_posix())
+            for name, locus in used_keywords(load_document(path)):
+                if name not in declared:
+                    names.add(name)
+                    undeclared.append(
+                        Finding(
+                            rule=KEYWORD_UNDECLARED,
+                            message=f"{subject} uses {name}, which no source declares",
+                            subject=subject,
+                            locus=locus,
+                        )
+                    )
+        if undeclared:
+            raise RegistryError(
+                f"owned schemas use undeclared keywords: {', '.join(sorted(names))}",
+                findings=undeclared,
+            )
 
     def _acquire(self, record: ResourceRecord, index: int, work_root: Path) -> AcquiredDependency:
         """Acquire one dependency, reporting a failure of its declaration against the record."""

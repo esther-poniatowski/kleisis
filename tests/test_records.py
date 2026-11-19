@@ -358,3 +358,17 @@ def test_a_child_project_declares_its_registry(tmp_path: Path) -> None:
     with pytest.raises(RecordError, match=r"projects\[0\]\.registry") as caught:
         load_resource_record(write_record(tmp_path, HEADER + "projects:\n  - path: child\n"))
     assert caught.value.findings[0].locus == "/projects/0/registry"
+
+
+@pytest.mark.parametrize(
+    ("keywords", "locus"),
+    [
+        ('  kind: "a keyword without its prefix"\n', "/keywords/kind"),
+        ("  x-Kind: a keyword in capitals\n", "/keywords/x-Kind"),
+        ('  x-kind: ""\n', "/keywords/x-kind"),
+    ],
+)
+def test_a_keyword_declaration_is_checked(tmp_path: Path, keywords: str, locus: str) -> None:
+    with pytest.raises(RecordError) as caught:
+        load_resource_record(write_record(tmp_path, HEADER + "keywords:\n" + keywords))
+    assert caught.value.findings[0].locus == locus

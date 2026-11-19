@@ -165,4 +165,9 @@ def compose_registry(
                     subject=child_target,
                     locus=IDENTIFIER_LOCUS,
                 )
-    return Registry(schemas=schemas, exports=registry.exports, resources=resources)
+    return Registry(
+        schemas=schemas,
+        exports=registry.exports,
+        resources=resources,
+        keywords=registry.keywords,
+    )

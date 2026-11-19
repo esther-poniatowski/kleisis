@@ -185,6 +185,18 @@
           }
         }
       }
+    },
+    "keywords": {
+      "description": "the x- keywords that the consumer gives a meaning to, each with its description",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^x-[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "\\S"
+      }
     }
   },
   "$defs": {
