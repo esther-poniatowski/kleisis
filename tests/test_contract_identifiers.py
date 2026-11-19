@@ -30,9 +30,9 @@ def _schema_accepts(text: str) -> bool:
     """Apply the pattern of the schema as JSON Schema applies it: a search, `$` at the very end.
 
     ECMA-262 lets `$` match only at the end of the input, whereas Python also matches it before a
-    final line break, so the translation writes `\\Z`; named groups take the Python form.
+    final line break, so the translation writes `\\Z`.
     """
-    pattern = SCHEMA["pattern"].replace("(?<", "(?P<").removesuffix("$") + r"\Z"
+    pattern = SCHEMA["pattern"].removesuffix("$") + r"\Z"
     return re.search(pattern, text) is not None
 
 
@@ -58,8 +58,10 @@ def test_invalid(case: dict[str, str]) -> None:
 
 
 def test_schema_pattern_equals_module_pattern() -> None:
-    """The schema publishes the pattern of the module, in the syntax of named groups of ECMA-262."""
-    assert SCHEMA["pattern"] == PATTERN.replace("(?P<", "(?<")
+    """The schema publishes the pattern of the module, which both Python and ECMA-262 compile."""
+    assert SCHEMA["pattern"] == PATTERN
+    assert "(?P<" not in PATTERN and "(?<" not in PATTERN
+    re.compile(PATTERN)
 
 
 def test_non_string_is_rejected() -> None:

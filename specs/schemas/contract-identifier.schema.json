@@ -4,5 +4,5 @@
   "title": "Contract identifier",
   "description": "the identifier of a contract, <namespace>:<name>@<version>: words in lower kebab case, words of the name joined by '.', and a positive version without leading zero",
   "type": "string",
-  "pattern": "^(?<namespace>[a-z][a-z0-9]*(?:-[a-z0-9]+)*):(?<name>[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*)@(?<version>[1-9][0-9]*)$"
+  "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*:[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*@[1-9][0-9]*$"
 }

@@ -11,15 +11,18 @@ import re
 from dataclasses import dataclass
 
 _WORD = r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*"
-PATTERN = rf"^(?P<namespace>{_WORD}):(?P<name>{_WORD}(?:\.{_WORD})*)@(?P<version>[1-9][0-9]*)$"
-"""Pattern of a contract identifier, written as the schema of the grammar writes it.
+PATTERN = rf"^{_WORD}:{_WORD}(?:\.{_WORD})*@[1-9][0-9]*$"
+"""Pattern of a contract identifier, as the schema of the grammar publishes it.
 
 The namespace names the owner of the contract. The name holds one or more words joined by `.`,
 such as `view.next-act`, each word in lower kebab case. The version is a positive integer written
-without a leading zero.
+without a leading zero. The pattern holds no named group, which the regular expressions of Python
+reject, so that a validator in Python or in JavaScript reads it.
 """
 
-_IDENTIFIER = re.compile(PATTERN.removeprefix("^").removesuffix("$"))
+_IDENTIFIER = re.compile(
+    rf"(?P<namespace>{_WORD}):(?P<name>{_WORD}(?:\.{_WORD})*)@(?P<version>[1-9][0-9]*)"
+)
 
 
 @dataclass(frozen=True)
