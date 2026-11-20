@@ -273,6 +273,8 @@ conda run -n kleisis ruff check --no-cache .
 conda run -n kleisis mypy src tests
 ```
 
+The tests check the SARIF logs of `check` and `validate` with the profile interface `elenchos.profile` of Elenchos. The file `environment.yml` and the extra `test` of `pyproject.toml` install Elenchos at a pinned commit, and a test fails when Elenchos is missing.
+
 ## License
 
 The [license terms](LICENSE) apply under the General Public License, release 3 or any subsequent release.

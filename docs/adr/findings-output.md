@@ -134,7 +134,7 @@ The rejected option would win if a baseline tolerated Kleisis findings, since a 
 ## Consequences
 
 - A new kind of failure takes a new rule in `src/kleisis/findings.py`. Renaming a rule changes the identity of its results, so it requires a rename map in the gate.
-- The tests of `tests/test_sarif.py` validate each log against the profile through a validator written from the profile text, and against copies of the test vectors of Elenchos. The vectors omit the rule list of the driver, which the gate does not check, so the validator checks that list on the logs of Kleisis only.
+- The tests of `tests/test_sarif.py` check each log that `check` and `validate` write with the interface `elenchos.profile` of Elenchos, installed at a pinned commit: `violations` checks the log against the profile, and `identities` states the identity of each result. The tests keep no rule of the profile and no copy of its test vectors, since Elenchos tests both.
 - Every failing run of `validate`, and every failing run of `check` other than a drift, is incomplete. The gate therefore reports it twice: through its findings, and through `check/incomplete`.
 - The rule `filesystem/failed` no longer exists, so a suppression naming it can no longer match a result.
 - The profile reserves `suppressions` for the gate, so the log omits it, although the migration brief asked for an empty list on each result.

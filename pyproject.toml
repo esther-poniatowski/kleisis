@@ -14,6 +14,13 @@ dependencies = [
     "PyYAML>=6.0,<7",
 ]
 
+[project.optional-dependencies]
+# The tests check the findings logs of `check` and `validate` with the profile interface of
+# Elenchos, installed without its extra `validate`.
+test = [
+    "elenchos @ git+https://github.com/esther-poniatowski/elenchos.git@089a764aafd137d5095a77fe3dbdb9198e6ae85b",
+]
+
 [project.scripts]
 kleisis = "kleisis.cli:main"
 
@@ -38,6 +45,11 @@ select = ["E", "F", "I", "B", "UP"]
 python_version = "3.12"
 strict = true
 packages = ["kleisis"]
+
+# Elenchos ships no `py.typed` marker, so mypy reads its annotated sources, which the tests import.
+[[tool.mypy.overrides]]
+module = ["elenchos", "elenchos.*"]
+follow_untyped_imports = true
 
 # --- Release ---------------------------------------------------------------------------------------
 # Read by the workflow `release.yml`. One version is stamped in the Python package and in the

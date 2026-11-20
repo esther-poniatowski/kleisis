@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 from conftest import concrete_schema
-from findings_profile import identities, log_violations
+from elenchos.profile import identities, violations
 from test_service import (
     LABEL,
     NOTE,
@@ -43,29 +43,8 @@ from kleisis.sarif import sarif_log
 CONFIG = PurePosixPath("kleisis.yml")
 """The configuration of the consumer in each test tree."""
 
-VECTORS = Path(__file__).parent / "fixtures/elenchos"
 RECORD = "path:kleisis.yml"
 OWNED = "path:specs/schemas/owned.schema.yaml"
-
-
-def load_vectors(name: str) -> list[dict[str, Any]]:
-    """Read one file of test vectors of the findings profile."""
-    vectors: list[dict[str, Any]] = json.loads((VECTORS / name).read_text(encoding="utf-8"))
-    return vectors
-
-
-@pytest.mark.parametrize("vector", load_vectors("identity.json"), ids=lambda item: item["case"])
-def test_validator_accepts_identity_vectors_and_builds_their_identities(
-    vector: dict[str, Any],
-) -> None:
-    # The vectors omit the rule list of the driver, which the gate does not check.
-    assert log_violations(vector["log"], require_rules=False) == []
-    assert identities(vector["log"]) == vector["expected"]
-
-
-@pytest.mark.parametrize("vector", load_vectors("rejected.json"), ids=lambda item: item["case"])
-def test_validator_rejects_rejected_vectors(vector: dict[str, Any]) -> None:
-    assert log_violations(vector["log"], require_rules=False) != []
 
 
 def run_main(arguments: list[str]) -> int:
@@ -519,7 +498,7 @@ def test_validation_failure_yields_one_conforming_result_per_failure(
     status, log = run_sarif(capsys, "validate", root)
 
     assert status == (2 if rule in RECORD_RULES else 1)
-    assert log_violations(log) == []
+    assert violations(log) == []
     assert [result["ruleId"] for result in log["runs"][0]["results"]] == [rule] * len(expected)
     assert identities(log) == expected
     assert stop_reason(log) == (
@@ -541,7 +520,7 @@ def test_drift_of_each_output_yields_its_own_result(
     status, log = run_sarif(capsys, "check", consumer)
 
     assert status == 1
-    assert log_violations(log) == []
+    assert violations(log) == []
     assert identities(log) == [
         "kleisis|drift/resources|path:.kleisis/resources/",
         "kleisis|drift/registry|path:specs/schema-registry.yml",
@@ -583,7 +562,7 @@ def test_filesystem_failure_declares_a_failed_run_without_result(
     log = json.loads(captured.out)
     assert status == 1
     assert captured.err == "kleisis: filesystem operation failed: planted failure\n"
-    assert log_violations(log) == []
+    assert violations(log) == []
     assert log["runs"][0]["results"] == []
     assert stop_reason(log) == "filesystem operation failed: planted failure"
 
@@ -601,7 +580,7 @@ def test_clean_run_yields_a_log_without_result(
     status, log = run_sarif(capsys, command, consumer)
 
     assert status == 0
-    assert log_violations(log) == []
+    assert violations(log) == []
     assert len(log["runs"]) == 1
     run = log["runs"][0]
     assert run["results"] == []
@@ -651,7 +630,7 @@ def test_output_option_writes_the_log_to_its_path(
     assert status == (1 if failing else 0)
     assert capsys.readouterr().out == ""
     log = json.loads(output.read_text(encoding="utf-8"))
-    assert log_violations(log) == []
+    assert violations(log) == []
     assert invocation(log)["executionSuccessful"] is not failing
 
 
@@ -795,7 +774,7 @@ def test_record_without_its_format_identifier_stops_with_status_2(
     status, log = run_sarif(capsys, "validate", root)
 
     assert status == 2
-    assert log_violations(log) == []
+    assert violations(log) == []
     assert identities(log) == [f"kleisis|record/invalid|{RECORD}|{locus}"]
     assert run_main(["validate", "--root", str(root)]) == 2
     assert "_schema: kleisis:configuration@1" in capsys.readouterr().err
@@ -817,7 +796,7 @@ def test_names_and_uris_escape_reserved_characters() -> None:
 
     log = sarif_log(findings, "0.0.0")
 
-    assert log_violations(log) == []
+    assert violations(log) == []
     results = log["runs"][0]["results"]
     assert [result["locations"][0]["logicalLocations"][0]["name"] for result in results] == [
         "path:docs/notes%23old%25.md#link:foo|bar.md",
@@ -859,140 +838,3 @@ def test_subject_outside_the_repository_falls_back_to_the_root() -> None:
     assert complete(Finding(rule, "a"), record).subject == record
     escaped = complete(Finding(rule, "b", PurePosixPath("../elsewhere.yml")), record)
     assert (escaped.subject, escaped.folder) == (PurePosixPath("."), True)
-
-
-def _set(path: str, value: object) -> Callable[[dict[str, Any]], None]:
-    """Return a mutation that sets one key of the first result, or deletes it for ``None``."""
-
-    def mutate(result: dict[str, Any]) -> None:
-        *parents, key = path.split(".")
-        target: Any = result
-        for parent in parents:
-            target = target[int(parent)] if parent.isdigit() else target[parent]
-        if value is None:
-            del target[key]
-        else:
-            target[key] = value
-
-    return mutate
-
-
-LOCATION = "locations.0"
-NAME = f"{LOCATION}.logicalLocations.0.name"
-URI = f"{LOCATION}.physicalLocation.artifactLocation.uri"
-
-
-@pytest.mark.parametrize(
-    "mutation",
-    [
-        _set("suppressions", []),
-        _set("fingerprints", {"elenchos/v1": "x"}),
-        _set("baselineState", "new"),
-        _set("kind", "fail"),
-        _set("level", None),
-        _set("level", "none"),
-        _set("ruleId", "Reference/Unresolved"),
-        _set("ruleId", "unknown/rule"),
-        _set("message", {"text": ""}),
-        _set(NAME, "specs/schemas/owned.schema.yaml"),
-        _set(NAME, "path:specs/schemas/owned.schema.yaml#"),
-        _set(NAME, "path:./specs/owned.schema.yaml"),
-        _set(NAME, "path:specs/%41.yaml"),
-        _set(NAME, "path:specs/schemas/owned.schema.yaml#section:a"),
-        _set(NAME, "path:specs/schemas/owned.schema.yaml#/a~2b"),
-        _set(URI, "specs/schemas/other.schema.yaml"),
-        _set(f"{LOCATION}.physicalLocation.artifactLocation.uriBaseId", None),
-        _set(f"{LOCATION}.physicalLocation", None),
-        _set("partialFingerprints", {"discriminator/v1": ""}),
-        _set("partialFingerprints", {"other/v1": "x"}),
-    ],
-)
-def test_validator_rejects_planted_defects_in_a_conforming_log(
-    mutation: Callable[[dict[str, Any]], None],
-) -> None:
-    finding = Finding(
-        REFERENCE_UNRESOLVED,
-        "planted",
-        PurePosixPath("specs/schemas/owned.schema.yaml"),
-        locus="link:defs.schema.yaml#/$defs/missing",
-    )
-    log = sarif_log([finding], "0.0.0")
-    assert log_violations(log) == []
-
-    mutation(log["runs"][0]["results"][0])
-
-    assert log_violations(log) != []
-
-
-def test_validator_requires_column_kind_with_results() -> None:
-    log = sarif_log([Finding(REFERENCE_UNRESOLVED, "planted", PurePosixPath("a.yml"))], "0.0.0")
-    del log["runs"][0]["columnKind"]
-
-    assert log_violations(log) != []
-
-
-def _stopped_log() -> dict[str, Any]:
-    finding = Finding(REFERENCE_UNRESOLVED, "planted", PurePosixPath("a.yml"))
-    return sarif_log([finding], "0.0.0", stopped="planted stop")
-
-
-def test_validator_admits_a_failed_run_without_results() -> None:
-    log = _stopped_log()
-    assert log_violations(log) == []
-
-    del log["runs"][0]["results"]
-
-    assert log_violations(log) == []
-
-
-ERROR_NOTE = {"level": "error", "message": {"text": "planted"}}
-
-
-@pytest.mark.parametrize(
-    "mutation",
-    [
-        _set("tool.driver.rules", None),
-        _set("tool.driver.rules.0.id", None),
-        _set("tool.driver.name", "elenchos"),
-        _set("invocations", [{}]),
-        _set("invocations", [{"executionSuccessful": False}]),
-        _set(
-            "invocations",
-            [{"executionSuccessful": True, "toolExecutionNotifications": [ERROR_NOTE]}],
-        ),
-        _set("invocations", [{"executionSuccessful": True}, {"executionSuccessful": True}]),
-        _set(
-            "invocations",
-            [
-                {
-                    "executionSuccessful": False,
-                    "toolExecutionNotifications": [{"level": "fatal", "message": {"text": "x"}}],
-                }
-            ],
-        ),
-        _set(
-            "invocations",
-            [{"executionSuccessful": False, "toolExecutionNotifications": [{"level": "error"}]}],
-        ),
-        lambda run: run.update(results=None),
-        _set("results", {}),
-    ],
-)
-def test_validator_rejects_planted_defects_in_a_complete_run(
-    mutation: Callable[[dict[str, Any]], None],
-) -> None:
-    log = sarif_log([Finding(REFERENCE_UNRESOLVED, "planted", PurePosixPath("a.yml"))], "0.0.0")
-    assert log_violations(log) == []
-
-    mutation(log["runs"][0])
-
-    assert log_violations(log) != []
-
-
-def test_validator_rejects_a_complete_run_without_results() -> None:
-    log = sarif_log([], "0.0.0")
-    assert log_violations(log) == []
-
-    del log["runs"][0]["results"]
-
-    assert log_violations(log) != []
