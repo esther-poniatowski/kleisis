@@ -60,14 +60,7 @@ dependencies:
 
 The configuration declares its format in its key `_schema: kleisis:configuration@1`. A configuration without this key, with another value, or with the retired key `format_version` stops each command with status 2, and the message names the value to write. The [schema of the configuration](specs/schemas/configuration.schema.json) publishes the format under an absolute `$id`.
 
-Kleisis finds the configuration through [Hodegos](https://github.com/esther-poniatowski/hodegos), in one of three places below the root: `kleisis.yml`, `.config/kleisis.yml`, or `kleisis.yml` in a folder that the declaration `hodegos.yml` of the root lists. A consumer that keeps the configurations of its tools in `config/tools/` declares that folder once:
-
-```yaml
-# hodegos.yml, at the root of the consumer
-_schema: hodegos:configuration@1
-folders:
-  - config/tools
-```
+Kleisis finds the configuration through [Hodegos](https://github.com/esther-poniatowski/hodegos), in one of three places below the root: `kleisis.yml`, `.config/kleisis.yml` or `config/kleisis.yml`. The [specification of Hodegos](https://github.com/esther-poniatowski/hodegos/blob/main/docs/specification.md#the-places-of-a-folder) states these places. Two places holding a configuration stop the command with status 2. Kleisis does not read the table `[tool.kleisis]` of `pyproject.toml`. A configuration kept in another folder, such as `shared/`, is named by the option `--config`, described in [Commands](#commands).
 
 The configuration replaces the former resource record `specs/schema-resources.yml`, of format `kleisis:schema-resources@2`. Kleisis now assumes no folder of the consumer, so an upgraded record declares its two paths. The upgrade takes three edits:
 
