@@ -304,7 +304,7 @@ class SchemaClosureService:
         acquired = [
             self._acquire(record, index, work_root) for index in range(len(record.dependencies))
         ]
-        self._check_keywords(root, record, acquired)
+        used = self._check_keywords(root, record, acquired)
         requested: list[tuple[SchemaSource, Path]] = []
         while True:
             materialized, external = self._materialize(acquired, record, resources_stage, requested)
@@ -334,7 +334,7 @@ class SchemaClosureService:
             if not reached:
                 break
             requested.extend(reached)
-        self._reject_unused(acquired, materialized)
+        self._reject_unused(acquired, materialized, used)
         consumer_files = sorted(
             path for path, source in closure.owners.items() if source is closure.consumer
         )
@@ -353,11 +353,13 @@ class SchemaClosureService:
 
     def _check_keywords(
         self, root: Path, record: ResourceRecord, acquired: list[AcquiredDependency]
-    ) -> None:
+    ) -> frozenset[str]:
         """Require one declaring source per `x-` keyword, and a declaration for each owned use.
 
         The declaring sources are the configuration and the registry of each dependency. Only the
-        owned schemas are searched: a materialized file was checked in its own repository.
+        owned schemas are searched: a materialized file was checked in its own repository. Return
+        the keywords that the owned schemas use, so that a dependency declaring one of them counts
+        as used.
         """
         declared = {name: "the configuration" for name in record.keywords}
         duplicates: list[Finding] = []
@@ -385,9 +387,11 @@ class SchemaClosureService:
         owned_root = resolve_inside(root, record.paths.owned_schemas, "paths.owned_schemas")
         undeclared: list[Finding] = []
         names: set[str] = set()
+        used: set[str] = set()
         for path in sorted(candidate_schemas(owned_root, record.schemas.suffixes)):
             subject = PurePosixPath(path.relative_to(root).as_posix())
             for name, locus in used_keywords(load_document(path)):
+                used.add(name)
                 if name not in declared:
                     names.add(name)
                     undeclared.append(
@@ -403,6 +407,7 @@ class SchemaClosureService:
                 f"owned schemas use undeclared keywords: {', '.join(sorted(names))}",
                 findings=undeclared,
             )
+        return frozenset(used)
 
     def _acquire(self, record: ResourceRecord, index: int, work_root: Path) -> AcquiredDependency:
         """Acquire one dependency, reporting a failure of its declaration against the record."""
@@ -456,19 +461,25 @@ class SchemaClosureService:
         return ConsumerClosure(consumer=consumer, owners=owners, listed_files=tuple(listed_files))
 
     def _reject_unused(
-        self, acquired: list[AcquiredDependency], materialized: list[MaterializedDependency]
+        self,
+        acquired: list[AcquiredDependency],
+        materialized: list[MaterializedDependency],
+        used: frozenset[str],
     ) -> None:
-        """Fail when a dependency that supplies only resources serves no reference."""
+        """Fail when a dependency that selects no contract serves no reference and declares no
+        keyword that an owned schema uses."""
         for item, result in zip(acquired, materialized, strict=True):
-            if not item.dependency.contracts and not result.files:
-                raise RegistryError(
-                    f"dependency {item.dependency.id} selects no contract, and no reference "
-                    "of the closure reaches its resources; remove the unused dependency",
-                    rule=DEPENDENCY_UNUSED,
-                    subject=self.record_path,
-                    locus=pointer("dependencies"),
-                    discriminator=item.dependency.id,
-                )
+            if item.dependency.contracts or result.files or used & set(item.keywords):
+                continue
+            raise RegistryError(
+                f"dependency {item.dependency.id} selects no contract, no reference of the "
+                "closure reaches its resources, and no owned schema uses its keywords; remove the "
+                "unused dependency",
+                rule=DEPENDENCY_UNUSED,
+                subject=self.record_path,
+                locus=pointer("dependencies"),
+                discriminator=item.dependency.id,
+            )
 
     def _materialize(
         self,

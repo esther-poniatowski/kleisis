@@ -1040,8 +1040,32 @@ def test_unused_resource_only_dependency_fails(tmp_path: Path) -> None:
     consumer, provider = make_resource_only(tmp_path, None)
 
     with pytest.raises(
-        RegistryError, match="dependency primitives selects no contract, and no reference"
+        RegistryError, match="dependency primitives selects no contract, no reference"
     ):
+        SchemaClosureService(CONFIG, source_provider=provider).validate(consumer)
+
+
+def test_a_dependency_serving_a_used_keyword_is_used(tmp_path: Path) -> None:
+    """A dependency that selects no contract and serves no reference is used when an owned schema
+    uses a keyword that its registry declares."""
+    consumer, provider = make_resource_only(tmp_path, None)
+    _append(consumer / "specs/schemas/owned.schema.yaml", "x-kind: note\n")
+    _append(
+        tmp_path / "primitives/specs/schema-registry.yml",
+        'keywords:\n  x-kind: "renders a field with a widget kind"\n',
+    )
+
+    SchemaClosureService(CONFIG, source_provider=provider).materialize(consumer)
+
+
+def test_a_dependency_declaring_only_unused_keywords_fails(tmp_path: Path) -> None:
+    consumer, provider = make_resource_only(tmp_path, None)
+    _append(
+        tmp_path / "primitives/specs/schema-registry.yml",
+        'keywords:\n  x-kind: "renders a field with a widget kind"\n',
+    )
+
+    with pytest.raises(RegistryError, match="no owned schema uses its keywords"):
         SchemaClosureService(CONFIG, source_provider=provider).validate(consumer)
 
 
