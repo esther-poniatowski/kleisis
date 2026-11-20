@@ -13,7 +13,7 @@ dependencies:
   # Sibling tools, pinned by commit; pip installs a Git reference, which a conda dependency cannot
   # name.
   - pip:
-      - hodegos @ git+https://github.com/esther-poniatowski/hodegos.git@e61d0d97eaa80cc0cfdd90c3022c1e3916ef1ad9
+      - hodegos @ git+https://github.com/esther-poniatowski/hodegos.git@a151a28010058fda08a652aea345422037ff0d3c
       # The tests check the findings logs with the profile interface of Elenchos.
       - elenchos @ git+https://github.com/esther-poniatowski/elenchos.git@089a764aafd137d5095a77fe3dbdb9198e6ae85b
       - -e .

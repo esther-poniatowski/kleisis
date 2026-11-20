@@ -10,7 +10,7 @@ requires-python = ">=3.12"
 license = "GPL-3.0-or-later"
 authors = [{name = "Esther Poniatowski", email = "esther.poniatowski@ens.psl.eu"}]
 dependencies = [
-    "hodegos @ git+https://github.com/esther-poniatowski/hodegos.git@e61d0d97eaa80cc0cfdd90c3022c1e3916ef1ad9",
+    "hodegos @ git+https://github.com/esther-poniatowski/hodegos.git@a151a28010058fda08a652aea345422037ff0d3c",
     "PyYAML>=6.0,<7",
 ]
 

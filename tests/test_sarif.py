@@ -695,27 +695,28 @@ def test_root_is_read_from_the_environment_then_overridden_by_the_option(
     assert "write kleisis.yml at the root" in capsys.readouterr().err
 
 
-def test_configuration_is_found_through_hodegos(
+def test_configuration_is_found_in_the_config_folder(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = owned_tree({"owned.schema.yaml": concrete_schema("consumer:owned@1")})(
         tmp_path, monkeypatch
     )
-    (root / "config/tools").mkdir(parents=True)
-    (root / "kleisis.yml").rename(root / "config/tools/kleisis.yml")
-    (root / "hodegos.yml").write_text(
-        "_schema: hodegos:configuration@1\nfolders: [config/tools]\n", encoding="utf-8"
-    )
+    (root / "config").mkdir()
+    (root / "kleisis.yml").rename(root / "config/kleisis.yml")
     monkeypatch.delenv("KLEISIS_ROOT", raising=False)
     monkeypatch.chdir(root / "specs/schemas")
 
-    # The root is the nearest folder that declares the folder holding the configuration.
+    # The root is the nearest folder whose subfolder `config/` holds the configuration.
     assert run_main(["validate"]) == 0
 
-    # Without the declaration, no place of the root holds the configuration.
-    (root / "hodegos.yml").unlink()
+    # A folder that no place admits, such as `shared/`, is not searched.
+    (root / "shared").mkdir()
+    (root / "config/kleisis.yml").rename(root / "shared/kleisis.yml")
     assert run_main(["validate"]) == 2
     assert "no configuration" in capsys.readouterr().err
+
+    # The configuration option names a configuration in such a folder.
+    assert run_main(["validate", "--root", str(root), "--config", "../../shared/kleisis.yml"]) == 0
 
 
 def test_root_that_is_not_a_folder_is_a_usage_error(

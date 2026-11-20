@@ -21,8 +21,12 @@ _REPORTING_COMMANDS = ("check", "validate")
 TOOL = Tool("kleisis", ("yml",))
 """Convention of Kleisis for Hodegos: the file `kleisis.yml`, and the variable `KLEISIS_ROOT`.
 
+The places of a folder are `kleisis.yml`, `.config/kleisis.yml` and `config/kleisis.yml`, as the
+specification of Hodegos states:
+https://github.com/esther-poniatowski/hodegos/blob/main/docs/specification.md#the-places-of-a-folder
 The table of `pyproject.toml` is no place of the configuration, since a consumer of Kleisis is a
-repository of schemas, rarely a Python project.
+repository of schemas, rarely a Python project. A configuration in another folder is named by
+`--config`.
 """
 
 
@@ -51,7 +55,7 @@ def _parser() -> argparse.ArgumentParser:
         "--config",
         type=Path,
         help="configuration file, read from the current folder and lying below the root; by "
-        "default kleisis.yml at the root, in .config/, or in a folder that hodegos.yml declares",
+        "default kleisis.yml at the root, in .config/, or in config/",
     )
     parser.add_argument(
         "--format",
@@ -117,7 +121,7 @@ def _locate(
     if found.configuration is None:
         parser.error(
             f"no configuration below {resolved_root}: write kleisis.yml at the root, in .config/, "
-            "or in a folder that hodegos.yml declares, or name it with --config"
+            "or in config/, or name it with --config"
         )
     resolved = found.configuration.path.resolve()
     if not resolved.is_relative_to(resolved_root):
