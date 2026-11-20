@@ -15,5 +15,5 @@ dependencies:
   - pip:
       - hodegos @ git+https://github.com/esther-poniatowski/hodegos.git@a151a28010058fda08a652aea345422037ff0d3c
       # The tests check the findings logs with the profile interface of Elenchos.
-      - elenchos @ git+https://github.com/esther-poniatowski/elenchos.git@089a764aafd137d5095a77fe3dbdb9198e6ae85b
+      - elenchos @ git+https://github.com/esther-poniatowski/elenchos.git@d41d2c00aed8f9668d84efb2ea0464a5eb9867ee
       - -e .
