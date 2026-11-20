@@ -8,6 +8,7 @@ of them depends on the wording of the message or on a staging directory.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
@@ -181,18 +182,49 @@ def pointer(*keys: str | int) -> str:
     return "".join("/" + str(key).replace("~", "~0").replace("/", "~1") for key in keys)
 
 
-_FIELD = re.compile(r"[A-Za-z_]+(?:\.[A-Za-z_]+|\[[0-9]+\])*")
-_FIELD_PART = re.compile(r"([A-Za-z_]+)|\[([0-9]+)\]")
+_BARE_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
+"""The keys that a label writes bare; a label writes every other key as a JSON string."""
 
 
-def field_pointer(field_name: str) -> str:
-    """Convert a record field name such as ``dependencies[0].source`` into a JSON Pointer.
+@dataclass(frozen=True)
+class KeyPath:
+    """The keys and positions that lead from the root of a document to one of its nodes.
 
-    A name outside that form, such as ``resource record``, denotes the whole document.
+    The path gives a finding its locus, the JSON Pointer of the node, and gives the message its
+    label, the name of the node for a reader. The label is presentation only, since the identity
+    of a finding uses the locus. ``document`` names the document, and labels its root.
     """
-    if not _FIELD.fullmatch(field_name) or field_name == "record":
-        return ""
-    return pointer(*(key or index for key, index in _FIELD_PART.findall(field_name)))
+
+    keys: tuple[str | int, ...] = ()
+    document: str = "document"
+
+    def __truediv__(self, step: str | int) -> KeyPath:
+        """Return the path extended by the key or the position ``step``."""
+        return replace(self, keys=(*self.keys, step))
+
+    @property
+    def pointer(self) -> str:
+        """Return the JSON Pointer of the node."""
+        return pointer(*self.keys)
+
+    @property
+    def label(self) -> str:
+        """Return the name of the node, such as ``dependencies[0].source`` or ``schemas["a:b@1"]``.
+
+        A position is written between brackets, and a key outside ``[A-Za-z_][A-Za-z0-9_-]*`` as a
+        JSON string between brackets, so that two paths below the root never share a label.
+        """
+        if not self.keys:
+            return self.document
+        parts: list[str] = []
+        for step in self.keys:
+            if isinstance(step, int):
+                parts.append(f"[{step}]")
+            elif _BARE_KEY.fullmatch(step):
+                parts.append(f".{step}" if parts else step)
+            else:
+                parts.append(f"[{json.dumps(step, ensure_ascii=False)}]")
+        return "".join(parts)
 
 
 def link(reference: str) -> str:

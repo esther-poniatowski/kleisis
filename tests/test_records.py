@@ -4,8 +4,10 @@ from pathlib import Path
 
 import pytest
 
+from kleisis.domain.models import safe_relative_path
 from kleisis.domain.records import RECORD_FORMAT, load_resource_record
 from kleisis.errors import RecordError
+from kleisis.findings import KeyPath
 
 HEADER = (
     f"_schema: {RECORD_FORMAT}\n"
@@ -372,3 +374,57 @@ def test_a_keyword_declaration_is_checked(tmp_path: Path, keywords: str, locus: 
     with pytest.raises(RecordError) as caught:
         load_resource_record(write_record(tmp_path, HEADER + "keywords:\n" + keywords))
     assert caught.value.findings[0].locus == locus
+
+
+@pytest.mark.parametrize(
+    ("body", "locus", "label"),
+    [
+        (
+            "keywords:\n  x-identifier: {meaning: a mapping}\n",
+            "/keywords/x-identifier",
+            "keyword x-identifier",
+        ),
+        (
+            "keywords:\n  x-a/b: slashed\n  x-c~d: tilded\n",
+            "/keywords/x-a~1b",
+            "keyword 'x-a/b'",
+        ),
+        ("schemas:\n  suffixes: [.schema.yaml, schema.yml]\n", "/schemas/suffixes/1", ""),
+        (
+            "dependencies:\n  - id: shared\n    source:\n      kind: git\n"
+            "      repository: https://example.org/shared.git\n"
+            f"      commit: {'a' * 40}\n"
+            "      archive_roots: [specs, ../outside]\n"
+            "    registry: specs/schema-registry.yml\n",
+            "/dependencies/0/source/archive_roots/1",
+            "dependencies[0].source.archive_roots[1]",
+        ),
+        ("projects:\n  - path: child\n    registry: [x]\n", "/projects/0/registry", ""),
+    ],
+)
+def test_a_defect_names_the_exact_locus(tmp_path: Path, body: str, locus: str, label: str) -> None:
+    with pytest.raises(RecordError) as caught:
+        load_resource_record(write_record(tmp_path, HEADER + body))
+    finding = caught.value.findings[0]
+    assert finding.locus == locus
+    assert finding.message.startswith(label)
+
+
+def test_a_key_holding_a_tilde_escapes_in_the_locus(tmp_path: Path) -> None:
+    with pytest.raises(RecordError) as caught:
+        load_resource_record(write_record(tmp_path, HEADER + "keywords:\n  x-c~d: tilded\n"))
+    assert caught.value.findings[0].locus == "/keywords/x-c~0d"
+
+
+def test_a_path_names_the_key_that_declares_it() -> None:
+    place = KeyPath(("keywords", "x-identifier", "path"))
+
+    with pytest.raises(RecordError, match="keywords.x-identifier.path must stay") as caught:
+        safe_relative_path("../outside", place)
+    assert caught.value.findings[0].locus == "/keywords/x-identifier/path"
+
+
+def test_a_configuration_that_is_no_mapping_concerns_the_whole_file(tmp_path: Path) -> None:
+    with pytest.raises(RecordError, match="configuration must be a mapping") as caught:
+        load_resource_record(write_record(tmp_path, "- a list\n"))
+    assert caught.value.findings[0].locus == ""

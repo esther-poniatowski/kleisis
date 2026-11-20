@@ -32,7 +32,7 @@ from kleisis.domain.models import (
     safe_relative_path,
 )
 from kleisis.errors import RecordError
-from kleisis.findings import CONTRACT_IDENTIFIER, RECORD_UNREADABLE, field_pointer, pointer
+from kleisis.findings import CONTRACT_IDENTIFIER, RECORD_UNREADABLE, KeyPath, Rule, pointer
 
 RECORD_FORMAT = "kleisis:configuration@1"
 """The format identifier that the configuration declares in its key ``_schema``."""
@@ -56,66 +56,68 @@ _PROPERTY_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
 _SUFFIX = re.compile(r"\.[A-Za-z0-9_.-]+")
 
 
-def _mapping(value: object, field_name: str) -> dict[str, Any]:
+_CONFIGURATION = KeyPath(document="configuration")
+"""The root of the configuration, from which each validator below names the node that it checks."""
+
+
+def _invalid(place: KeyPath, defect: str, rule: Rule | None = None) -> RecordError:
+    """Return the failure of the node at ``place``, named by its label and located by its pointer.
+
+    ``defect`` states the failure after the label, as in ``must be a mapping``.
+    """
+    return RecordError(f"{place.label} {defect}", rule=rule, locus=place.pointer)
+
+
+def _mapping(value: object, place: KeyPath) -> dict[str, Any]:
     if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
-        raise RecordError(f"{field_name} must be a mapping", locus=field_pointer(field_name))
+        raise _invalid(place, "must be a mapping")
     return cast(dict[str, Any], value)
 
 
-def _sequence(value: object, field_name: str) -> list[Any]:
+def _sequence(value: object, place: KeyPath) -> list[Any]:
     if value is None:
         return []
     if not isinstance(value, list):
-        raise RecordError(f"{field_name} must be a sequence", locus=field_pointer(field_name))
+        raise _invalid(place, "must be a sequence")
     return value
 
 
-def _keys(value: dict[str, Any], allowed: set[str], field_name: str) -> None:
+def _keys(value: dict[str, Any], allowed: set[str], place: KeyPath) -> None:
     unknown = sorted(set(value) - allowed)
     if unknown:
-        raise RecordError(
-            f"{field_name} contains unknown fields: {', '.join(unknown)}",
-            locus=field_pointer(field_name),
-        )
+        raise _invalid(place, f"contains unknown fields: {', '.join(unknown)}")
 
 
-def _nonempty_string(value: object, field_name: str) -> str:
+def _nonempty_string(value: object, place: KeyPath) -> str:
     if not isinstance(value, str) or not value.strip():
-        raise RecordError(
-            f"{field_name} must be a non-empty string", locus=field_pointer(field_name)
-        )
+        raise _invalid(place, "must be a non-empty string")
     return value
 
 
-def _contract(value: object, field_name: str) -> str:
+def _contract(value: object, place: KeyPath) -> str:
     """Return a contract identifier, or raise naming its grammar."""
-    text = _nonempty_string(value, field_name)
+    text = _nonempty_string(value, place)
     if not is_contract_identifier(text):
-        raise RecordError(
-            f"{field_name} {text!r} is no contract identifier: write <namespace>:<name>@<version>",
+        raise _invalid(
+            place,
+            f"{text!r} is no contract identifier: write <namespace>:<name>@<version>",
             rule=CONTRACT_IDENTIFIER,
-            locus=field_pointer(field_name),
         )
     return text
 
 
-def _commit(value: object, field_name: str) -> str:
-    result = _nonempty_string(value, field_name)
+def _commit(value: object, place: KeyPath) -> str:
+    result = _nonempty_string(value, place)
     if not _FULL_COMMIT.fullmatch(result):
-        raise RecordError(
-            f"{field_name} must be a full lowercase Git commit", locus=field_pointer(field_name)
-        )
+        raise _invalid(place, "must be a full lowercase Git commit")
     return result
 
 
-def _portable_https_url(value: object, field_name: str) -> str:
-    result = _nonempty_string(value, field_name)
+def _portable_https_url(value: object, place: KeyPath) -> str:
+    result = _nonempty_string(value, place)
     parsed = urlparse(result)
     if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
-        raise RecordError(
-            f"{field_name} must be an HTTPS URL without embedded credentials",
-            locus=field_pointer(field_name),
-        )
+        raise _invalid(place, "must be an HTTPS URL without embedded credentials")
     return result
 
 
@@ -164,201 +166,155 @@ def _check_format(root: dict[str, Any]) -> None:
 
 
 def _resource_record(raw: object) -> ResourceRecord:
-    root = _mapping(raw, "configuration")
+    root = _mapping(raw, _CONFIGURATION)
     _check_format(root)
     _keys(
         root,
         {"_schema", "paths", "schemas", "exports", "dependencies", "projects", "keywords"},
-        "record",
+        _CONFIGURATION,
     )
 
-    raw_paths = _mapping(root.get("paths", {}), "paths")
-    _keys(raw_paths, {"owned_schemas", "registry", "resources", "state"}, "paths")
+    paths_place = _CONFIGURATION / "paths"
+    raw_paths = _mapping(root.get("paths", {}), paths_place)
+    _keys(raw_paths, {"owned_schemas", "registry", "resources", "state"}, paths_place)
     for required in ("owned_schemas", "registry"):
         if required not in raw_paths:
             raise RecordError(
-                f"the configuration declares no paths.{required}; Kleisis assumes no folder of "
-                "the consumer",
-                locus=pointer("paths", required),
+                f"the configuration declares no {(paths_place / required).label}; Kleisis "
+                "assumes no folder of the consumer",
+                locus=(paths_place / required).pointer,
             )
-    state = safe_relative_path(raw_paths.get("state", DEFAULT_STATE.as_posix()), "paths.state")
+    state = safe_relative_path(
+        raw_paths.get("state", DEFAULT_STATE.as_posix()), paths_place / "state"
+    )
     paths = Paths(
-        owned_schemas=safe_relative_path(raw_paths["owned_schemas"], "paths.owned_schemas"),
-        registry=safe_relative_path(raw_paths["registry"], "paths.registry"),
+        owned_schemas=safe_relative_path(raw_paths["owned_schemas"], paths_place / "owned_schemas"),
+        registry=safe_relative_path(raw_paths["registry"], paths_place / "registry"),
         resources=safe_relative_path(
             raw_paths.get("resources", (state / RESOURCES_IN_STATE).as_posix()),
-            "paths.resources",
+            paths_place / "resources",
         ),
         state=state,
     )
 
     schemas = _schema_convention(root.get("schemas", {}))
 
+    exports_place = _CONFIGURATION / "exports"
     exports = tuple(
-        _contract(item, f"exports[{index}]")
-        for index, item in enumerate(_sequence(root.get("exports"), "exports"))
+        _contract(item, exports_place / index)
+        for index, item in enumerate(_sequence(root.get("exports"), exports_place))
     )
     if len(exports) != len(set(exports)):
-        raise RecordError("exports contains duplicate identifiers", locus=pointer("exports"))
+        raise _invalid(exports_place, "contains duplicate identifiers")
 
     dependencies: list[Dependency] = []
     dependency_ids: set[str] = set()
-    for index, item in enumerate(_sequence(root.get("dependencies"), "dependencies")):
-        raw_dependency = _mapping(item, f"dependencies[{index}]")
-        _keys(
-            raw_dependency,
-            {"id", "source", "registry", "contracts", "binding"},
-            f"dependencies[{index}]",
-        )
-        dependency_id = _nonempty_string(raw_dependency.get("id"), f"dependencies[{index}].id")
+    dependencies_place = _CONFIGURATION / "dependencies"
+    for index, item in enumerate(_sequence(root.get("dependencies"), dependencies_place)):
+        place = dependencies_place / index
+        raw_dependency = _mapping(item, place)
+        _keys(raw_dependency, {"id", "source", "registry", "contracts", "binding"}, place)
+        dependency_id = _nonempty_string(raw_dependency.get("id"), place / "id")
         if not _DEPENDENCY_ID.fullmatch(dependency_id):
-            raise RecordError(
-                f"dependencies[{index}].id must be lower kebab-case",
-                locus=pointer("dependencies", index, "id"),
-            )
+            raise _invalid(place / "id", "must be lower kebab-case")
         if dependency_id in dependency_ids:
             raise RecordError(
-                f"duplicate dependency id: {dependency_id}",
-                locus=pointer("dependencies", index, "id"),
+                f"duplicate dependency id: {dependency_id}", locus=(place / "id").pointer
             )
         dependency_ids.add(dependency_id)
 
-        raw_source = _mapping(raw_dependency.get("source"), f"dependencies[{index}].source")
+        source_place = place / "source"
+        raw_source = _mapping(raw_dependency.get("source"), source_place)
         kind = raw_source.get("kind")
         source: GitSource | ArtifactSource
         if kind == "git":
             _keys(
                 raw_source,
                 {"kind", "repository", "commit", "credential_env", "archive_roots"},
-                f"dependencies[{index}].source",
+                source_place,
             )
             credential_env = raw_source.get("credential_env")
             if credential_env is not None and (
                 not isinstance(credential_env, str)
                 or not _ENVIRONMENT_NAME.fullmatch(credential_env)
             ):
-                raise RecordError(
-                    f"dependencies[{index}].source.credential_env "
-                    "must name an environment variable",
-                    locus=pointer("dependencies", index, "source", "credential_env"),
-                )
+                raise _invalid(source_place / "credential_env", "must name an environment variable")
+            roots_place = source_place / "archive_roots"
             raw_archive_roots = raw_source.get("archive_roots")
             archive_roots = tuple(
-                safe_relative_path(
-                    item,
-                    f"dependencies[{index}].source.archive_roots[{root_index}]",
-                )
-                for root_index, item in enumerate(
-                    _sequence(
-                        raw_archive_roots,
-                        f"dependencies[{index}].source.archive_roots",
-                    )
-                )
+                safe_relative_path(item, roots_place / root_index)
+                for root_index, item in enumerate(_sequence(raw_archive_roots, roots_place))
             )
             if raw_archive_roots is not None and not archive_roots:
-                raise RecordError(
-                    f"dependencies[{index}].source.archive_roots must be non-empty when present",
-                    locus=pointer("dependencies", index, "source", "archive_roots"),
-                )
+                raise _invalid(roots_place, "must be non-empty when present")
             if len(archive_roots) != len(set(archive_roots)):
-                raise RecordError(
-                    f"dependencies[{index}].source.archive_roots must be unique",
-                    locus=pointer("dependencies", index, "source", "archive_roots"),
-                )
+                raise _invalid(roots_place, "must be unique")
             if archive_roots != tuple(sorted(archive_roots)):
-                raise RecordError(
-                    f"dependencies[{index}].source.archive_roots must follow path order",
-                    locus=pointer("dependencies", index, "source", "archive_roots"),
-                )
+                raise _invalid(roots_place, "must follow path order")
             source = GitSource(
                 kind="git",
                 repository=_portable_https_url(
-                    raw_source.get("repository"), f"dependencies[{index}].source.repository"
+                    raw_source.get("repository"), source_place / "repository"
                 ),
-                commit=_commit(raw_source.get("commit"), f"dependencies[{index}].source.commit"),
+                commit=_commit(raw_source.get("commit"), source_place / "commit"),
                 credential_env=credential_env,
                 archive_roots=archive_roots,
             )
         elif kind == "artifact":
-            _keys(
-                raw_source,
-                {"kind", "locator", "source_commit", "sha256"},
-                f"dependencies[{index}].source",
-            )
-            digest = _nonempty_string(
-                raw_source.get("sha256"), f"dependencies[{index}].source.sha256"
-            )
+            _keys(raw_source, {"kind", "locator", "source_commit", "sha256"}, source_place)
+            digest = _nonempty_string(raw_source.get("sha256"), source_place / "sha256")
             if not _SHA256.fullmatch(digest):
-                raise RecordError(
-                    f"dependencies[{index}].source.sha256 must be lowercase SHA-256",
-                    locus=pointer("dependencies", index, "source", "sha256"),
-                )
+                raise _invalid(source_place / "sha256", "must be lowercase SHA-256")
             source = ArtifactSource(
                 kind="artifact",
-                locator=_portable_https_url(
-                    raw_source.get("locator"), f"dependencies[{index}].source.locator"
-                ),
+                locator=_portable_https_url(raw_source.get("locator"), source_place / "locator"),
                 source_commit=_commit(
-                    raw_source.get("source_commit"),
-                    f"dependencies[{index}].source.source_commit",
+                    raw_source.get("source_commit"), source_place / "source_commit"
                 ),
                 sha256=digest,
             )
         else:
-            raise RecordError(
-                f"dependencies[{index}].source.kind must be git or artifact",
-                locus=pointer("dependencies", index, "source", "kind"),
-            )
+            raise _invalid(source_place / "kind", "must be git or artifact")
 
+        contracts_place = place / "contracts"
         contracts = tuple(
-            _contract(contract, f"dependencies[{index}].contracts[{contract_index}]")
+            _contract(contract, contracts_place / contract_index)
             for contract_index, contract in enumerate(
-                _sequence(raw_dependency.get("contracts"), f"dependencies[{index}].contracts")
+                _sequence(raw_dependency.get("contracts"), contracts_place)
             )
         )
         if len(contracts) != len(set(contracts)):
-            raise RecordError(
-                f"dependencies[{index}].contracts must be unique",
-                locus=pointer("dependencies", index, "contracts"),
-            )
+            raise _invalid(contracts_place, "must be unique")
         dependencies.append(
             Dependency(
                 id=dependency_id,
                 source=source,
-                registry=safe_relative_path(
-                    raw_dependency.get("registry"), f"dependencies[{index}].registry"
-                ),
+                registry=safe_relative_path(raw_dependency.get("registry"), place / "registry"),
                 contracts=contracts,
-                binding=_binding(
-                    raw_dependency.get("binding", DEFAULT_BINDING),
-                    f"dependencies[{index}].binding",
-                ),
+                binding=_binding(raw_dependency.get("binding", DEFAULT_BINDING), place / "binding"),
             )
         )
 
     projects: list[Project] = []
     project_paths: set[object] = set()
-    for index, item in enumerate(_sequence(root.get("projects"), "projects")):
-        raw_project = _mapping(item, f"projects[{index}]")
-        _keys(raw_project, {"path", "registry", "required"}, f"projects[{index}]")
-        project_path = safe_relative_path(raw_project.get("path"), f"projects[{index}].path")
+    projects_place = _CONFIGURATION / "projects"
+    for index, item in enumerate(_sequence(root.get("projects"), projects_place)):
+        place = projects_place / index
+        raw_project = _mapping(item, place)
+        _keys(raw_project, {"path", "registry", "required"}, place)
+        project_path = safe_relative_path(raw_project.get("path"), place / "path")
         if project_path in project_paths:
             raise RecordError(
-                f"duplicate project path: {project_path}", locus=pointer("projects", index, "path")
+                f"duplicate project path: {project_path}", locus=(place / "path").pointer
             )
         project_paths.add(project_path)
         required = raw_project.get("required", True)
         if not isinstance(required, bool):
-            raise RecordError(
-                f"projects[{index}].required must be a boolean",
-                locus=pointer("projects", index, "required"),
-            )
+            raise _invalid(place / "required", "must be a boolean")
         projects.append(
             Project(
                 path=project_path,
-                registry=safe_relative_path(
-                    raw_project.get("registry"), f"projects[{index}].registry"
-                ),
+                registry=safe_relative_path(raw_project.get("registry"), place / "registry"),
                 required=required,
             )
         )
@@ -375,58 +331,52 @@ def _resource_record(raw: object) -> ResourceRecord:
 
 def _keywords(raw: object) -> dict[str, str]:
     """Return the declared keywords, each named `x-<words>` and described by a non-empty string."""
-    declared = _mapping(raw, "keywords")
+    place = _CONFIGURATION / "keywords"
+    declared = _mapping(raw, place)
     for name, description in declared.items():
-        if not isinstance(name, str) or not KEYWORD.fullmatch(name):
+        if not KEYWORD.fullmatch(name):
             raise RecordError(
                 f"keyword {name!r} must be x- followed by words in lower kebab case",
-                locus=pointer("keywords", str(name)),
+                locus=(place / name).pointer,
             )
         if not isinstance(description, str) or not description.strip():
             raise RecordError(
-                f"keyword {name} must hold a non-empty description",
-                locus=pointer("keywords", name),
+                f"keyword {name} must hold a non-empty description", locus=(place / name).pointer
             )
     return dict(declared)
 
 
-def _binding(value: object, field_name: str) -> str:
+def _binding(value: object, place: KeyPath) -> str:
     """Return the name of a binding property, a JSON property name without a pointer escape."""
-    name = _nonempty_string(value, field_name)
+    name = _nonempty_string(value, place)
     if not _PROPERTY_NAME.fullmatch(name):
-        raise RecordError(
-            f"{field_name} must be a property name of letters, digits, '_' and '-'",
-            locus=field_pointer(field_name),
-        )
+        raise _invalid(place, "must be a property name of letters, digits, '_' and '-'")
     return name
 
 
 def _schema_convention(raw: object) -> SchemaConvention:
     """Return the schema convention of the record, each key defaulting to the conventional value."""
-    convention = _mapping(raw, "schemas")
-    _keys(convention, {"suffixes", "binding"}, "schemas")
+    place = _CONFIGURATION / "schemas"
+    convention = _mapping(raw, place)
+    _keys(convention, {"suffixes", "binding"}, place)
+    suffixes_place = place / "suffixes"
     raw_suffixes = convention.get("suffixes")
     suffixes = (
         DEFAULT_SCHEMA_SUFFIXES
         if raw_suffixes is None
         else tuple(
-            _nonempty_string(item, f"schemas.suffixes[{index}]")
-            for index, item in enumerate(_sequence(raw_suffixes, "schemas.suffixes"))
+            _nonempty_string(item, suffixes_place / index)
+            for index, item in enumerate(_sequence(raw_suffixes, suffixes_place))
         )
     )
     if not suffixes:
-        raise RecordError(
-            "schemas.suffixes must not be empty", locus=pointer("schemas", "suffixes")
-        )
+        raise _invalid(suffixes_place, "must not be empty")
     if len(suffixes) != len(set(suffixes)):
-        raise RecordError("schemas.suffixes must be unique", locus=pointer("schemas", "suffixes"))
+        raise _invalid(suffixes_place, "must be unique")
     for index, suffix in enumerate(suffixes):
         if not _SUFFIX.fullmatch(suffix):
-            raise RecordError(
-                f"schemas.suffixes[{index}] must open with a dot and hold no separator",
-                locus=pointer("schemas", "suffixes", index),
-            )
+            raise _invalid(suffixes_place / index, "must open with a dot and hold no separator")
     return SchemaConvention(
         suffixes=suffixes,
-        binding=_binding(convention.get("binding", DEFAULT_BINDING), "schemas.binding"),
+        binding=_binding(convention.get("binding", DEFAULT_BINDING), place / "binding"),
     )

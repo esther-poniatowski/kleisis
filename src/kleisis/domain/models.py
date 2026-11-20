@@ -7,21 +7,19 @@ from pathlib import Path, PurePath, PurePosixPath
 from typing import Literal
 
 from kleisis.errors import RecordError
-from kleisis.findings import PATH_ESCAPE, field_pointer
+from kleisis.findings import PATH_ESCAPE, KeyPath
 
 
-def safe_relative_path(value: object, field_name: str) -> PurePosixPath:
-    """Return a normalized repository-relative path."""
+def safe_relative_path(value: object, place: KeyPath) -> PurePosixPath:
+    """Return a normalized repository-relative path, declared at ``place``."""
     if not isinstance(value, str) or not value.strip():
-        raise RecordError(
-            f"{field_name} must be a non-empty string", locus=field_pointer(field_name)
-        )
+        raise RecordError(f"{place.label} must be a non-empty string", locus=place.pointer)
     path = PurePosixPath(value)
     if path.is_absolute() or ".." in path.parts or path == PurePosixPath("."):
         raise RecordError(
-            f"{field_name} must stay inside the repository: {value!r}",
+            f"{place.label} must stay inside the repository: {value!r}",
             rule=PATH_ESCAPE,
-            locus=field_pointer(field_name),
+            locus=place.pointer,
         )
     return path
 

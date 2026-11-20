@@ -237,3 +237,19 @@ def test_duplicate_identifier_with_different_bytes_is_rejected(tmp_path: Path) -
 
     with pytest.raises(RegistryError, match="duplicate \\$id 'urn:example:a' names different"):
         resource_map(tmp_path, sorted(tmp_path.iterdir()))
+
+
+def test_a_faulty_path_of_a_registry_names_its_key(tmp_path: Path) -> None:
+    path = tmp_path / "schema-registry.yml"
+    path.write_text(
+        "_schema: kleisis:schema-registry@2\nschemas: {}\nexports: []\n"
+        "resources:\n  urn:example:a/b~c: ../outside.schema.yaml\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        RegistryError, match=r'resources\["urn:example:a/b~c"\] must stay'
+    ) as caught:
+        load_registry(path)
+    finding = caught.value.findings[0]
+    assert (finding.rule.id, finding.locus) == ("path/escape", "/resources/urn:example:a~1b~0c")

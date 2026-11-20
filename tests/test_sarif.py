@@ -33,9 +33,9 @@ from kleisis.findings import (
     REFERENCE_UNRESOLVED,
     RULES,
     Finding,
+    KeyPath,
     Rule,
     complete,
-    field_pointer,
     pointer,
 )
 from kleisis.sarif import sarif_log
@@ -813,17 +813,38 @@ def test_names_and_uris_escape_reserved_characters() -> None:
     ]
 
 
-def test_field_names_become_json_pointers() -> None:
-    assert field_pointer("dependencies[0].source.archive_roots[1]") == (
+def test_key_paths_become_json_pointers() -> None:
+    assert KeyPath(("dependencies", 0, "source", "archive_roots", 1)).pointer == (
         "/dependencies/0/source/archive_roots/1"
     )
-    assert field_pointer("resource record") == ""
-    assert field_pointer("record") == ""
+    assert KeyPath(document="resource record").pointer == ""
     assert pointer("schemas", "a/b~c") == "/schemas/a~1b~0c"
 
 
+@pytest.mark.parametrize(
+    ("path", "locus", "label"),
+    [
+        (
+            KeyPath() / "keywords" / "x-identifier",
+            "/keywords/x-identifier",
+            "keywords.x-identifier",
+        ),
+        (KeyPath() / "schemas" / "a/b", "/schemas/a~1b", 'schemas["a/b"]'),
+        (KeyPath() / "schemas" / "c~d", "/schemas/c~0d", 'schemas["c~d"]'),
+        (KeyPath() / "schemas" / "~1", "/schemas/~01", 'schemas["~1"]'),
+        (KeyPath() / "exports" / 3, "/exports/3", "exports[3]"),
+        (KeyPath() / "resources" / "0", "/resources/0", 'resources["0"]'),
+        (KeyPath() / "a b" / 0 / "c", "/a b/0/c", '["a b"][0].c'),
+        (KeyPath() / "", "/", '[""]'),
+        (KeyPath(document="configuration"), "", "configuration"),
+    ],
+)
+def test_a_key_path_gives_the_locus_and_the_label(path: KeyPath, locus: str, label: str) -> None:
+    assert (path.pointer, path.label) == (locus, label)
+
+
 def test_segments_convert_as_the_examples_of_the_profile() -> None:
-    assert field_pointer("relations[2].target") == "/relations/2/target"
+    assert KeyPath(("relations", 2, "target")).pointer == "/relations/2/target"
     assert pointer("relations", 2, "target") == "/relations/2/target"
     assert pointer("a/b") == "/a~1b"
     assert pointer("c~1d") == "/c~01d"

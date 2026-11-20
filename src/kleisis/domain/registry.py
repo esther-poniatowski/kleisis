@@ -31,6 +31,7 @@ from kleisis.findings import (
     REGISTRY_INVALID,
     RESOURCES_CONFLICTING_BYTES,
     SCHEMA_UNREADABLE,
+    KeyPath,
     Rule,
     pointer,
 )
@@ -179,8 +180,9 @@ def _registry_paths(path: Path, value: object, field_name: str) -> dict[str, Pur
                 subject=path,
                 locus=pointer(field_name),
             )
+        place = KeyPath((field_name, key))
         try:
-            result[key] = safe_relative_path(target, f"{field_name}[{key!r}]")
+            result[key] = safe_relative_path(target, place)
         except SchemaClosureError as exc:
             # An escape keeps its rule; any other fault of a path is a fault of the registry.
             rule = exc.findings[0].rule
@@ -188,7 +190,7 @@ def _registry_paths(path: Path, value: object, field_name: str) -> dict[str, Pur
                 str(exc),
                 rule=rule if rule is PATH_ESCAPE else REGISTRY_INVALID,
                 subject=path,
-                locus=pointer(field_name, key),
+                locus=place.pointer,
             ) from exc
     return result
 
